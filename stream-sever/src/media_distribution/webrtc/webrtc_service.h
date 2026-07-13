@@ -100,11 +100,6 @@ public:
     WebRTCStats GetStats() const;
 
     /**
-     * @brief 流消费者回调（用于注册到 StreamDispatcher）
-     */
-    static void StreamConsumer(EncodedStreamPtr stream, void* user_data);
-
-    /**
      * @brief 发送视频帧
      * @param stream 编码后的视频流
      */
@@ -156,24 +151,3 @@ private:
     std::shared_ptr<SignalingClient> signaling_;
     std::shared_ptr<WebRTCSystem> webrtc_;
 };
-
-// ============================================================================
-// 全局实例管理
-// ============================================================================
-
-/**
- * @brief 获取全局 WebRTC 服务实例
- */
-WebRTCService* GetWebRTCService();
-
-/**
- * @brief 创建全局 WebRTC 服务实例
- * @param config WebRTC 服务配置
- */
-void CreateWebRTCService(const WebRTCServiceConfig& config);
-
-/**
- * @brief 销毁全局 WebRTC 服务实例
- */
-void DestroyWebRTCService();
-

@@ -9,6 +9,7 @@
 #define LOG_TAG "file"
 
 #include "file_saver.h"
+#include "common/h264_nal_parser.h"
 #include "common/logger.h"
 
 #include "rk_mpi_mb.h"
@@ -61,58 +62,6 @@ static bool EnsureDirectory(const std::string& dir) {
     
     LOG_ERROR("Failed to create directory: {}", dir);
     return false;
-}
-
-/**
- * @brief 在 H.264 Annex B 流中查找 NAL 单元
- * @param data 数据指针
- * @param size 数据大小
- * @param start 输出：NAL 起始位置（不含 start code）
- * @param nal_size 输出：NAL 大小
- * @param offset 搜索起始偏移
- * @return 下一个 NAL 的搜索偏移，如果没有找到返回 size
- */
-static size_t FindNalUnit(const uint8_t* data, size_t size, 
-                          const uint8_t** start, size_t* nal_size, 
-                          size_t offset = 0) {
-    // 查找 start code (0x000001 或 0x00000001)
-    size_t i = offset;
-    while (i + 3 < size) {
-        if (data[i] == 0 && data[i + 1] == 0) {
-            if (data[i + 2] == 1) {
-                // 0x000001
-                *start = data + i + 3;
-                break;
-            } else if (data[i + 2] == 0 && i + 4 < size && data[i + 3] == 1) {
-                // 0x00000001
-                *start = data + i + 4;
-                break;
-            }
-        }
-        i++;
-    }
-    
-    if (i + 3 >= size) {
-        *start = nullptr;
-        *nal_size = 0;
-        return size;
-    }
-    
-    // 查找下一个 start code 来确定 NAL 大小
-    size_t nal_start = *start - data;
-    size_t j = nal_start;
-    while (j + 3 < size) {
-        if (data[j] == 0 && data[j + 1] == 0 && 
-            (data[j + 2] == 1 || (data[j + 2] == 0 && j + 4 < size && data[j + 3] == 1))) {
-            *nal_size = j - nal_start;
-            return j;
-        }
-        j++;
-    }
-    
-    // 到末尾
-    *nal_size = size - nal_start;
-    return size;
 }
 
 // ============================================================================
@@ -247,43 +196,15 @@ void Mp4Recorder::CloseOutputFile() {
 bool Mp4Recorder::SetExtradataFromStream(const uint8_t* data, size_t size) {
     // 从 H.264 Annex B 流中提取 SPS 和 PPS
     // H.264 NAL 类型：7=SPS, 8=PPS
-    
-    const uint8_t* sps_data = nullptr;
-    const uint8_t* pps_data = nullptr;
-    size_t sps_size = 0;
-    size_t pps_size = 0;
-    
-    size_t offset = 0;
-    while (offset < size) {
-        const uint8_t* nal_start = nullptr;
-        size_t nal_size = 0;
-        offset = FindNalUnit(data, size, &nal_start, &nal_size, offset);
-        
-        if (!nal_start || nal_size == 0) {
-            break;
-        }
-        
-        uint8_t nal_type = nal_start[0] & 0x1F;
-        
-        if (nal_type == 7 && !sps_data) {  // SPS
-            sps_data = nal_start;
-            sps_size = nal_size;
-            LOG_DEBUG("Found SPS: {} bytes", sps_size);
-        } else if (nal_type == 8 && !pps_data) {  // PPS
-            pps_data = nal_start;
-            pps_size = nal_size;
-            LOG_DEBUG("Found PPS: {} bytes", pps_size);
-        }
-        
-        if (sps_data && pps_data) {
-            break;
-        }
-    }
-    
-    if (!sps_data || !pps_data) {
+
+    h264::NalUnit sps;
+    h264::NalUnit pps;
+    if (!h264::FindSpsPps(data, size, &sps, &pps)) {
         LOG_WARN("SPS or PPS not found in stream");
         return false;
     }
+    LOG_DEBUG("Found SPS: {} bytes", sps.size);
+    LOG_DEBUG("Found PPS: {} bytes", pps.size);
     
     // 构造 AVCC 格式的 extradata
     // AVCC 格式：
@@ -299,7 +220,7 @@ bool Mp4Recorder::SetExtradataFromStream(const uint8_t* data, size_t size) {
     // 2 bytes: PPS length (big endian)
     // PPS data
     
-    size_t extradata_size = 6 + 2 + sps_size + 1 + 2 + pps_size;
+    size_t extradata_size = 6 + 2 + sps.size + 1 + 2 + pps.size;
     uint8_t* extradata = static_cast<uint8_t*>(av_malloc(extradata_size + AV_INPUT_BUFFER_PADDING_SIZE));
     if (!extradata) {
         LOG_ERROR("Failed to allocate extradata");
@@ -309,19 +230,19 @@ bool Mp4Recorder::SetExtradataFromStream(const uint8_t* data, size_t size) {
     
     uint8_t* p = extradata;
     *p++ = 1;                          // version
-    *p++ = sps_data[1];                // profile
-    *p++ = sps_data[2];                // compatibility
-    *p++ = sps_data[3];                // level
+    *p++ = sps.start[1];               // profile
+    *p++ = sps.start[2];               // compatibility
+    *p++ = sps.start[3];               // level
     *p++ = 0xFF;                       // 4 bytes NAL length
     *p++ = 0xE1;                       // 1 SPS
-    *p++ = (sps_size >> 8) & 0xFF;     // SPS length high byte
-    *p++ = sps_size & 0xFF;            // SPS length low byte
-    memcpy(p, sps_data, sps_size);
-    p += sps_size;
+    *p++ = (sps.size >> 8) & 0xFF;     // SPS length high byte
+    *p++ = sps.size & 0xFF;            // SPS length low byte
+    memcpy(p, sps.start, sps.size);
+    p += sps.size;
     *p++ = 1;                          // 1 PPS
-    *p++ = (pps_size >> 8) & 0xFF;     // PPS length high byte
-    *p++ = pps_size & 0xFF;            // PPS length low byte
-    memcpy(p, pps_data, pps_size);
+    *p++ = (pps.size >> 8) & 0xFF;     // PPS length high byte
+    *p++ = pps.size & 0xFF;            // PPS length low byte
+    memcpy(p, pps.start, pps.size);
     
     // 设置到 codecpar
     AVFormatContext* ofmt_ctx = static_cast<AVFormatContext*>(format_ctx_);
@@ -335,7 +256,7 @@ bool Mp4Recorder::SetExtradataFromStream(const uint8_t* data, size_t size) {
     video_stream->codecpar->extradata = extradata;
     video_stream->codecpar->extradata_size = extradata_size;
     
-    LOG_INFO("Set H.264 extradata: SPS={} bytes, PPS={} bytes", sps_size, pps_size);
+    LOG_INFO("Set H.264 extradata: SPS={} bytes, PPS={} bytes", sps.size, pps.size);
     return true;
 }
 
@@ -411,48 +332,55 @@ bool Mp4Recorder::WriteFrame(const EncodedStreamPtr& stream) {
         LOG_INFO("Header written, recording started from keyframe");
     }
     
-    std::lock_guard<std::mutex> lock(mutex_);
-    
-    if (!format_ctx_) {
-        return false;
+    bool max_duration_reached = false;
+    double duration_sec = 0.0;
+
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        if (!format_ctx_) {
+            return false;
+        }
+
+        AVFormatContext* ofmt_ctx = static_cast<AVFormatContext*>(format_ctx_);
+        AVStream* video_stream = ofmt_ctx->streams[0];
+
+        int flags = 0;
+        if (is_keyframe) {
+            flags |= AV_PKT_FLAG_KEY;
+        }
+
+        uint64_t relative_pts = (stream->pstPack->u64PTS - first_pts_) / 1000;
+
+        AVPacket packet = {};
+        packet.data = static_cast<uint8_t*>(data);
+        packet.size = stream->pstPack->u32Len;
+        packet.pts = av_rescale_q(relative_pts, AVRational{1, 1000}, video_stream->time_base);
+        packet.dts = packet.pts;
+        packet.stream_index = video_stream->index;
+        packet.duration = av_rescale_q(1, AVRational{1, config_.fps}, video_stream->time_base);
+        packet.flags = flags;
+
+        int ret = av_interleaved_write_frame(ofmt_ctx, &packet);
+        if (ret < 0) {
+            char errbuf[128];
+            av_strerror(ret, errbuf, sizeof(errbuf));
+            LOG_ERROR("Error writing frame: {}", errbuf);
+            return false;
+        }
+
+        stats_.frames_written++;
+        stats_.bytes_written += stream->pstPack->u32Len;
+        stats_.duration_sec = static_cast<double>(relative_pts) / 1000.0;
+
+        duration_sec = stats_.duration_sec;
+        max_duration_reached = config_.maxDurationSec > 0 && duration_sec >= config_.maxDurationSec;
     }
-    
-    AVFormatContext* ofmt_ctx = static_cast<AVFormatContext*>(format_ctx_);
-    AVStream* video_stream = ofmt_ctx->streams[0];
-    
-    int flags = 0;
-    if (is_keyframe) {
-        flags |= AV_PKT_FLAG_KEY;
-    }
-    
-    uint64_t relative_pts = (stream->pstPack->u64PTS - first_pts_) / 1000;
-    
-    AVPacket packet = {};
-    packet.data = static_cast<uint8_t*>(data);
-    packet.size = stream->pstPack->u32Len;
-    packet.pts = av_rescale_q(relative_pts, AVRational{1, 1000}, video_stream->time_base);
-    packet.dts = packet.pts;
-    packet.stream_index = video_stream->index;
-    packet.duration = av_rescale_q(1, AVRational{1, config_.fps}, video_stream->time_base);
-    packet.flags = flags;
-    
-    int ret = av_interleaved_write_frame(ofmt_ctx, &packet);
-    if (ret < 0) {
-        char errbuf[128];
-        av_strerror(ret, errbuf, sizeof(errbuf));
-        LOG_ERROR("Error writing frame: {}", errbuf);
-        return false;
-    }
-    
-    stats_.frames_written++;
-    stats_.bytes_written += stream->pstPack->u32Len;
-    stats_.duration_sec = static_cast<double>(relative_pts) / 1000.0;
-    
-    // 检查限制
-    if (config_.maxDurationSec > 0 && stats_.duration_sec >= config_.maxDurationSec) {
-        LOG_INFO("Max duration reached, stopping recording");
-        // 注意：这里不能直接调用 StopRecording，因为会死锁
-        // 应该在外部线程处理
+
+    if (max_duration_reached) {
+        LOG_INFO("Max recording duration reached ({:.2f}s >= {}s), stopping recording",
+                 duration_sec, config_.maxDurationSec);
+        StopRecording();
     }
     
     return true;

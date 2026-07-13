@@ -117,7 +117,7 @@ public:
      * 
      * 用于注册到 StreamDispatcher
      */
-    static void StreamConsumer(EncodedStreamPtr stream, void* user_data);
+    void OnEncodedStream(const EncodedStreamPtr& stream);
 
 private:
     /**
@@ -159,11 +159,3 @@ private:
     std::atomic<uint64_t> frames_sent_{0};
     std::atomic<uint64_t> bytes_sent_{0};
 };
-
-// ============================================================================
-// 全局实例管理（可选）
-// ============================================================================
-
-WsPreviewServer* GetWsPreviewServer();
-void CreateWsPreviewServer(const WsPreviewConfig& config);
-void DestroyWsPreviewServer();

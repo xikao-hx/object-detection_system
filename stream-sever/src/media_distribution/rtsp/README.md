@@ -17,7 +17,7 @@ rtsp/
 EncodedStreamPtr
       |
       v
-RtspService::StreamConsumer
+RtspService::OnEncodedStream
       |
       v
 RtspServer::PushFrame

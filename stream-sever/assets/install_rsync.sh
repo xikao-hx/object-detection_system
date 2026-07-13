@@ -3,8 +3,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-BUILD_DIR="${AIPC_BUILD_DIR:-build/Debug}"
+BUILD_DIR="${AIPC_BUILD_DIR:-${PROJECT_DIR}/build/Debug}"
 INSTALL_DIR="${AIPC_INSTALL_DIR:-${BUILD_DIR}/install}"
 SYSROOT="${AIPC_SYSROOT:-/home/xikao/Luckfox/luckfox-pico/sysdrv/source/buildroot/buildroot-2023.02.6/output/host/arm-buildroot-linux-uclibcgnueabihf/sysroot}"
 REMOTE_HOST="${AIPC_REMOTE_HOST:-root@192.168.5.9}"

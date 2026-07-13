@@ -139,6 +139,8 @@ int main(int argc, char *argv[]) {
     // 配置流输出
     // ========================================================================
     StreamConfig stream_config;
+    const auto startup_resolution = media::simple_ipc::ResolutionConfig::FromPreset(
+            media::simple_ipc::Resolution::R_1080P);
 
     // RTSP 配置 - 创建服务但不自动启动，通过 WebUI 控制
     stream_config.enable_rtsp = true;
@@ -159,14 +161,17 @@ int main(int argc, char *argv[]) {
     stream_config.webrtc_config.signaling_url = std::string("ws://") + signaling_host + ":8000/";
 
     // WebRTC 视频参数配置
-    stream_config.webrtc_config.webrtc_config.video.width = 1920;
-    stream_config.webrtc_config.webrtc_config.video.height = 1080;
-    stream_config.webrtc_config.webrtc_config.video.fps = 30;
+    stream_config.webrtc_config.webrtc_config.video.width = startup_resolution.width;
+    stream_config.webrtc_config.webrtc_config.video.height = startup_resolution.height;
+    stream_config.webrtc_config.webrtc_config.video.fps = startup_resolution.framerate;
 
     // 文件保存配置 - 默认启用
     stream_config.enable_file = true;
     const char *record_dir = std::getenv("AIPC_RECORD_DIR");
     stream_config.mp4_config.outputDir = record_dir ? record_dir : "/root/record";
+    stream_config.mp4_config.width = startup_resolution.width;
+    stream_config.mp4_config.height = startup_resolution.height;
+    stream_config.mp4_config.fps = startup_resolution.framerate;
 
     // WebSocket 预览配置 - 默认启用
     stream_config.enable_ws_preview = true;
@@ -278,44 +283,44 @@ int main(int argc, char *argv[]) {
     auto *stream_mgr = GetStreamManager();
 
     // 注册 RTSP 消费者
-    if (stream_mgr->GetRtspService()) {
+    if (auto *rtsp = stream_mgr->GetRtspService()) {
         media_manager.RegisterStreamConsumer(
                 "rtsp",
-                [](EncodedStreamPtr stream) {
-                    RtspService::StreamConsumer(stream, GetStreamManager()->GetRtspService());
+                [rtsp](EncodedStreamPtr stream) {
+                    rtsp->OnEncodedStream(stream);
                 },
                 media::StreamConsumerType::AsyncIO);
         LOG_INFO("RTSP consumer registered");
     }
 
     // 注册 WebSocket 预览消费者
-    if (stream_mgr->GetWsPreviewServer()) {
+    if (auto *ws_preview = stream_mgr->GetWsPreviewServer()) {
         media_manager.RegisterStreamConsumer(
                 "ws_preview",
-                [](EncodedStreamPtr stream) {
-                    WsPreviewServer::StreamConsumer(stream, GetStreamManager()->GetWsPreviewServer());
+                [ws_preview](EncodedStreamPtr stream) {
+                    ws_preview->OnEncodedStream(stream);
                 },
                 media::StreamConsumerType::AsyncIO);
         LOG_INFO("WebSocket preview consumer registered");
     }
 
     // 注册文件保存消费者
-    if (stream_mgr->GetFileService()) {
+    if (auto *file = stream_mgr->GetFileService()) {
         media_manager.RegisterStreamConsumer(
                 "file",
-                [](EncodedStreamPtr stream) {
-                    FileService::StreamConsumer(stream, GetStreamManager()->GetFileService());
+                [file](EncodedStreamPtr stream) {
+                    file->OnEncodedStream(stream);
                 },
                 media::StreamConsumerType::Queued, 10);
         LOG_INFO("File consumer registered");
     }
 
     // 注册 WebRTC 消费者
-    if (stream_mgr->GetWebRTCService()) {
+    if (auto *webrtc = stream_mgr->GetWebRTCService()) {
         media_manager.RegisterStreamConsumer(
                 "webrtc",
-                [](EncodedStreamPtr stream) {
-                    WebRTCService::StreamConsumer(stream, GetStreamManager()->GetWebRTCService());
+                [webrtc](EncodedStreamPtr stream) {
+                    webrtc->SendVideoFrame(stream);
                 },
                 media::StreamConsumerType::AsyncIO);
         LOG_INFO("WebRTC consumer registered");
@@ -351,13 +356,13 @@ int main(int argc, char *argv[]) {
     // ========================================================================
     LOG_INFO("Shutting down AIPC...");
 
-    // 1. 先清除流消费者（防止继续 post 新帧到 IoContext）
-    LOG_DEBUG("Clearing stream consumers...");
-    media_manager.ClearStreamConsumers();
-
-    // 2. 停止 MediaManager（等待 fetch 线程退出）
+    // 1. 停止 MediaManager（等待 fetch 线程退出，防止继续 post 新帧到 IoContext）
     media_manager.Stop();
     LOG_INFO("MediaManager stopped");
+
+    // 2. 清除流消费者（dispatcher 已停止，符合运行中禁止变更 consumer 的约束）
+    LOG_DEBUG("Clearing stream consumers...");
+    media_manager.ClearStreamConsumers();
 
     // 3. 排空 IO Context 中的待处理任务（释放已 post 的帧）
     LOG_DEBUG("Draining IO context to release pending buffers...");

@@ -17,9 +17,6 @@ file/
 EncodedStreamPtr
       |
       v
-FileService::StreamConsumer
-      |
-      v
 FileService::OnEncodedStream
       |
       v
@@ -50,7 +47,7 @@ service.Start();
 service.StartRecording();
 
 // Producer 输出帧时调用：
-FileService::StreamConsumer(stream, &service);
+service.OnEncodedStream(stream);
 
 service.StopRecording();
 service.Stop();

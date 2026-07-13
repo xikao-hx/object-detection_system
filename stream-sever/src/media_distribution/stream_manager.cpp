@@ -124,6 +124,11 @@ void StreamManager::Stop() {
     if (webrtc_service_) {
         webrtc_service_->Stop();
     }
+
+    // 停止 WebSocket 预览
+    if (ws_preview_server_) {
+        ws_preview_server_->Stop();
+    }
     
     LOG_INFO("StreamManager stopped");
 }
@@ -145,4 +150,3 @@ StreamManager* GetStreamManager() {
 void DestroyStreamManager() {
     g_stream_manager.reset();
 }
-

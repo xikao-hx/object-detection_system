@@ -119,7 +119,7 @@ namespace media {
     }
 
     bool MediaManager::IsRunning() const {
-        std::lock_guard<std::mutex> lock(const_cast<std::mutex &>(mutex_));
+        std::lock_guard<std::mutex> lock(mutex_);
         return producer_ && producer_->IsRunning();
     }
 
@@ -272,6 +272,11 @@ namespace media {
 
         std::lock_guard<std::mutex> lock(mutex_);
 
+        if (manager_running_) {
+            LOG_WARN("Cannot register stream consumer '{}' while media manager is running", name);
+            return;
+        }
+
         // 保存到列表
         consumers_.push_back({name, callback, type, queue_size});
 
@@ -285,6 +290,11 @@ namespace media {
 
     void MediaManager::ClearStreamConsumers() {
         std::lock_guard<std::mutex> lock(mutex_);
+
+        if (manager_running_) {
+            LOG_WARN("Cannot clear stream consumers while media manager is running");
+            return;
+        }
 
         consumers_.clear();
         if (producer_) {
@@ -318,7 +328,7 @@ namespace media {
     // ============================================================================
 
     const char *MediaManager::GetCurrentTypeName() const {
-        std::lock_guard<std::mutex> lock(const_cast<std::mutex &>(mutex_));
+        std::lock_guard<std::mutex> lock(mutex_);
         if (producer_) {
             return producer_->GetTypeName();
         }

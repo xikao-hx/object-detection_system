@@ -18,7 +18,7 @@ webrtc/
 EncodedStreamPtr
       |
       v
-WebRTCService::StreamConsumer
+WebRTCService::SendVideoFrame
       |
       v
 WebRTCSystem::SendVideoData

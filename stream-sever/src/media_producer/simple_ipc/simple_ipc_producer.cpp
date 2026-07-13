@@ -45,12 +45,22 @@ namespace media {
         };
 
         void RegisterConsumer(const std::string &name, StreamCallback callback, StreamConsumerType type) {
+            if (running_.load()) {
+                LOG_WARN("Cannot register stream consumer '{}' while dispatcher is running", name);
+                return;
+            }
             consumers_.push_back({name, std::move(callback), type});
             LOG_INFO("Registered stream consumer: {} (type={})", name,
                      type == StreamConsumerType::AsyncIO ? "AsyncIO" : "Direct");
         }
 
-        void ClearConsumers() { consumers_.clear(); }
+        void ClearConsumers() {
+            if (running_.load()) {
+                LOG_WARN("Cannot clear stream consumers while dispatcher is running");
+                return;
+            }
+            consumers_.clear();
+        }
 
         void Start(int venc_chn) {
             if (running_)
@@ -293,7 +303,8 @@ namespace media {
         LOG_DEBUG("VPSS initialized");
 
         // 5. VENC 初始化
-        ret = venc_init(kVencChn, res.width, res.height, RK_VIDEO_ID_AVC);
+        ret = venc_init(kVencChn, res.width, res.height, RK_VIDEO_ID_AVC,
+                        config_.bitrate_kbps, config_.framerate, config_.framerate);
         if (ret != 0) {
             LOG_ERROR("VENC init failed");
             return -1;

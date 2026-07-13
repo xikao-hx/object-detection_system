@@ -102,36 +102,3 @@ void FileService::OnEncodedStream(const EncodedStreamPtr& stream) {
         mp4_recorder_->WriteFrame(stream);
     }
 }
-
-void FileService::StreamConsumer(EncodedStreamPtr stream, void* user_data) {
-    FileService* self = static_cast<FileService*>(user_data);
-    if (self) {
-        self->OnEncodedStream(stream);
-    }
-}
-
-// ============================================================================
-// 全局实例管理
-// ============================================================================
-
-static std::unique_ptr<FileService> g_file_service;
-
-FileService* GetFileService() {
-    return g_file_service.get();
-}
-
-void CreateFileService(const FileServiceConfig& config) {
-    if (g_file_service) {
-        LOG_WARN("Global FileService already exists, destroying old one");
-        DestroyFileService();
-    }
-    
-    g_file_service = std::make_unique<FileService>(config);
-}
-
-void DestroyFileService() {
-    if (g_file_service) {
-        g_file_service->Stop();
-        g_file_service.reset();
-    }
-}

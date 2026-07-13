@@ -4,6 +4,7 @@
  */
 
 #include "ws_preview.h"
+#include "common/h264_nal_parser.h"
 #include "common/logger.h"
 
 #include <rtc/websocketserver.hpp>
@@ -229,65 +230,25 @@ void WsPreviewServer::SendVideoFrame(const uint8_t* data, size_t size, uint64_t 
 }
 
 void WsPreviewServer::ExtractSpsPps(const uint8_t* data, size_t size) {
-    // 搜索 NAL 单元，提取 SPS (type=7) 和 PPS (type=8)
-    for (size_t i = 0; i + 4 < size; ) {
-        // 查找起始码
-        size_t start_code_len = 0;
-        if (data[i] == 0 && data[i+1] == 0 && data[i+2] == 0 && data[i+3] == 1) {
-            start_code_len = 4;
-        } else if (data[i] == 0 && data[i+1] == 0 && data[i+2] == 1) {
-            start_code_len = 3;
-        } else {
-            i++;
-            continue;
-        }
+    h264::NalUnit sps;
+    h264::NalUnit pps;
+    if (!h264::FindSpsPps(data, size, &sps, &pps)) {
+        return;
+    }
 
-        size_t nal_start = i + start_code_len;
-        if (nal_start >= size) break;
-
-        uint8_t nal_type = data[nal_start] & 0x1F;
-
-        // 查找下一个起始码以确定 NAL 单元结束位置
-        size_t nal_end = size;
-        for (size_t j = nal_start + 1; j + 3 < size; j++) {
-            if ((data[j] == 0 && data[j+1] == 0 && data[j+2] == 0 && data[j+3] == 1) ||
-                (data[j] == 0 && data[j+1] == 0 && data[j+2] == 1)) {
-                nal_end = j;
-                break;
-            }
-        }
-
-        size_t nal_size = nal_end - i;  // 包含起始码
-
-        if (nal_type == 7) {  // SPS
-            std::lock_guard<std::mutex> lock(sps_pps_mutex_);
-            cached_sps_.assign(data + i, data + i + nal_size);
-            LOG_DEBUG("缓存 SPS: {} 字节", nal_size);
-        } else if (nal_type == 8) {  // PPS
-            std::lock_guard<std::mutex> lock(sps_pps_mutex_);
-            cached_pps_.assign(data + i, data + i + nal_size);
-            LOG_DEBUG("缓存 PPS: {} 字节", nal_size);
-        }
-
-        i = nal_end;
+    std::lock_guard<std::mutex> lock(sps_pps_mutex_);
+    if (sps.annexb_start && sps.annexb_size > 0) {
+        cached_sps_.assign(sps.annexb_start, sps.annexb_start + sps.annexb_size);
+        LOG_DEBUG("缓存 SPS: {} 字节", sps.annexb_size);
+    }
+    if (pps.annexb_start && pps.annexb_size > 0) {
+        cached_pps_.assign(pps.annexb_start, pps.annexb_start + pps.annexb_size);
+        LOG_DEBUG("缓存 PPS: {} 字节", pps.annexb_size);
     }
 }
 
 bool WsPreviewServer::IsKeyframe(const uint8_t* data, size_t size) const {
-    for (size_t i = 0; i + 4 < size; i++) {
-        if ((data[i] == 0 && data[i+1] == 0 && data[i+2] == 0 && data[i+3] == 1) ||
-            (data[i] == 0 && data[i+1] == 0 && data[i+2] == 1)) {
-            size_t nal_start = (data[i+2] == 1) ? i + 3 : i + 4;
-            if (nal_start < size) {
-                uint8_t nal_type = data[nal_start] & 0x1F;
-                // IDR 帧 (type=5) 或 SPS (type=7)
-                if (nal_type == 5 || nal_type == 7) {
-                    return true;
-                }
-            }
-        }
-    }
-    return false;
+    return h264::IsKeyframe(data, size);
 }
 
 void WsPreviewServer::SendSpsPps(std::shared_ptr<rtc::WebSocket> ws) {
@@ -309,9 +270,8 @@ void WsPreviewServer::SendSpsPps(std::shared_ptr<rtc::WebSocket> ws) {
     }
 }
 
-void WsPreviewServer::StreamConsumer(EncodedStreamPtr stream, void* user_data) {
-    auto* self = static_cast<WsPreviewServer*>(user_data);
-    if (!self || !stream || !stream->pstPack) {
+void WsPreviewServer::OnEncodedStream(const EncodedStreamPtr& stream) {
+    if (!stream || !stream->pstPack) {
         return;
     }
 
@@ -321,26 +281,6 @@ void WsPreviewServer::StreamConsumer(EncodedStreamPtr stream, void* user_data) {
     uint64_t pts = get_stream_pts(stream);
 
     if (data && len > 0) {
-        self->SendVideoFrame(data, len, pts);
+        SendVideoFrame(data, len, pts);
     }
-}
-
-// ============================================================================
-// 全局实例管理
-// ============================================================================
-
-static std::unique_ptr<WsPreviewServer> g_ws_preview_server;
-
-WsPreviewServer* GetWsPreviewServer() {
-    return g_ws_preview_server.get();
-}
-
-void CreateWsPreviewServer(const WsPreviewConfig& config) {
-    if (!g_ws_preview_server) {
-        g_ws_preview_server = std::make_unique<WsPreviewServer>(config);
-    }
-}
-
-void DestroyWsPreviewServer() {
-    g_ws_preview_server.reset();
 }

@@ -121,11 +121,6 @@ public:
      */
     void OnEncodedStream(const EncodedStreamPtr& stream);
 
-    /**
-     * @brief 获取流消费者回调（用于注册到 StreamDispatcher）
-     */
-    static void StreamConsumer(EncodedStreamPtr stream, void* user_data);
-
 private:
     FileServiceConfig config_;
     
@@ -133,25 +128,3 @@ private:
     
     std::atomic<bool> running_{false};
 };
-
-// ============================================================================
-// 全局文件服务实例（可选）
-// ============================================================================
-
-/**
- * @brief 获取全局文件服务实例（懒加载）
- * 
- * @note 如果需要多实例，直接创建 FileService 对象
- */
-FileService* GetFileService();
-
-/**
- * @brief 创建全局文件服务实例
- * @param config 配置
- */
-void CreateFileService(const FileServiceConfig& config);
-
-/**
- * @brief 销毁全局文件服务实例
- */
-void DestroyFileService();

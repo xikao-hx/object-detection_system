@@ -74,34 +74,13 @@ public:
     RtspServer::Stats GetStats() const;
 
     /**
-     * @brief 流消费者回调（用于注册到 StreamDispatcher）
+     * @brief 处理编码流帧（用于注册到 StreamDispatcher）
      * 只有在 running_ 状态下才会推送帧
      */
-    static void StreamConsumer(EncodedStreamPtr stream, void* user_data);
+    void OnEncodedStream(const EncodedStreamPtr& stream);
 
 private:
     RtspConfig config_;
     bool valid_ = false;
     std::atomic<bool> running_{false};  ///< 是否正在推送视频帧
 };
-
-// ============================================================================
-// 全局实例管理
-// ============================================================================
-
-/**
- * @brief 获取全局 RTSP 服务实例
- */
-RtspService* GetRtspService();
-
-/**
- * @brief 创建全局 RTSP 服务实例
- * @param config RTSP 配置
- */
-void CreateRtspService(const RtspConfig& config);
-
-/**
- * @brief 销毁全局 RTSP 服务实例
- */
-void DestroyRtspService();
-

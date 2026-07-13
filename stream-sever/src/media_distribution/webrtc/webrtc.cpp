@@ -7,6 +7,7 @@
  */
 
 #include "webrtc.h"
+#include "common/h264_nal_parser.h"
 #include "common/logger.h"
 
 #include <rtc/rtc.hpp>
@@ -216,24 +217,7 @@ void WebRTCSystem::SendVideoData(const uint8_t* data, size_t size, uint64_t time
         return;
     }
 
-    // 检测关键帧（IDR帧）：搜索 NAL Unit Type 5 (IDR) 或 Type 7 (SPS)
-    // H.264 NAL Unit 起始码：00 00 00 01 或 00 00 01
-    bool is_keyframe = false;
-    for (size_t i = 0; i + 4 < size; i++) {
-        // 查找起始码 00 00 00 01 或 00 00 01
-        if ((data[i] == 0 && data[i+1] == 0 && data[i+2] == 0 && data[i+3] == 1) ||
-            (data[i] == 0 && data[i+1] == 0 && data[i+2] == 1)) {
-            size_t nal_start = (data[i+2] == 1) ? i + 3 : i + 4;
-            if (nal_start < size) {
-                uint8_t nal_type = data[nal_start] & 0x1F;
-                // NAL Type 5 = IDR, Type 7 = SPS
-                if (nal_type == 5 || nal_type == 7) {
-                    is_keyframe = true;
-                    break;
-                }
-            }
-        }
-    }
+    bool is_keyframe = h264::IsKeyframe(data, size);
 
     // 如果还没收到关键帧，跳过非关键帧
     if (!keyframe_received_ && !is_keyframe) {
@@ -958,4 +942,3 @@ bool WebRTCSystem::HasPendingLocalIceCandidates() const {
     std::lock_guard<std::mutex> lock(local_ice_mutex_);
     return !local_ice_candidates_.empty();
 }
-

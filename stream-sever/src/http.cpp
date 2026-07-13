@@ -131,603 +131,647 @@ void HttpApi::SetupRoutes() {
         return;
     }
 
-    // ========================================================================
-    // 系统状态 API
-    // ========================================================================
-    server_->Get("/api/status", [this](const HttpRequest & /*req*/, HttpResponse &res) {
-        auto *mgr = GetStreamManager();
-        json data;
+    RegisterSystemRoutes();
+    RegisterRtspRoutes();
+    RegisterWebrtcRoutes();
+    RegisterRecordRoutes();
+    RegisterProducerRoutes();
+    RegisterAiRoutes();
+    RegisterPipelineRoutes();
+    RegisterModelRoutes();
 
-        // RTSP 状态
-        data["rtsp"]["enabled"] = stream_config_.enable_rtsp;
-        if (mgr && mgr->GetRtspService()) {
-            data["rtsp"]["valid"] = mgr->GetRtspService()->IsValid();
-            data["rtsp"]["running"] = mgr->GetRtspService()->IsRunning();
-        }
+    LOG_INFO("HTTP API 路由配置完成");
+}
 
-        // WebRTC 状态
-        data["webrtc"]["enabled"] = stream_config_.enable_webrtc;
-        if (mgr && mgr->GetWebRTCService()) {
-            data["webrtc"]["running"] = mgr->GetWebRTCService()->IsRunning();
-        }
-
-        // 录制状态
-        data["recording"]["enabled"] = stream_config_.enable_file;
-        if (mgr && mgr->GetFileService()) {
-            auto *fs = mgr->GetFileService();
-            data["recording"]["active"] = fs->IsRecording();
-            data["recording"]["output_dir"] = stream_config_.mp4_config.outputDir;
-        }
-
-        // 媒体生产者状态
-        auto &media_mgr = media::MediaManager::Instance();
-        data["producer"]["mode"] = media::ProducerModeToString(media_mgr.GetCurrentMode());
-        data["producer"]["running"] = media_mgr.IsRunning();
-
-        res.set_content(json_response(true, "ok", data), "application/json");
+void HttpApi::RegisterSystemRoutes() {
+    server_->Get("/api/status", [this](const HttpRequest &req, HttpResponse &res) {
+        HandleStatus(req, res);
     });
+}
 
-    // ========================================================================
-    // RTSP 状态 API
-    // ========================================================================
-    server_->Get("/api/rtsp/status", [](const HttpRequest & /*req*/, HttpResponse &res) {
-        auto *mgr = GetStreamManager();
-        if (!mgr || !mgr->GetRtspService()) {
-            res.set_content(json_response(false, "RTSP not available"), "application/json");
-            return;
-        }
-
-        auto *rtsp = mgr->GetRtspService();
-        auto stats = rtsp->GetStats();
-        json data;
-        data["valid"] = rtsp->IsValid();
-        data["running"] = rtsp->IsRunning();
-        data["url"] = rtsp->GetUrl();
-        data["frames_sent"] = stats.framesSent;
-        data["bytes_sent"] = stats.bytesSent;
-        res.set_content(json_response(true, "ok", data), "application/json");
+void HttpApi::RegisterRtspRoutes() {
+    server_->Get("/api/rtsp/status", [this](const HttpRequest &req, HttpResponse &res) {
+        HandleRtspStatus(req, res);
     });
+    server_->Post("/api/rtsp/start", [this](const HttpRequest &req, HttpResponse &res) {
+        HandleRtspStart(req, res);
+    });
+    server_->Post("/api/rtsp/stop", [this](const HttpRequest &req, HttpResponse &res) {
+        HandleRtspStop(req, res);
+    });
+}
 
-    // ========================================================================
-    // RTSP 控制 API
-    // ========================================================================
-    server_->Post("/api/rtsp/start", [](const HttpRequest & /*req*/, HttpResponse &res) {
-        auto *mgr = GetStreamManager();
-        if (!mgr || !mgr->GetRtspService()) {
-            res.set_content(json_response(false, "RTSP not available"), "application/json");
+void HttpApi::RegisterWebrtcRoutes() {
+    server_->Get("/api/webrtc/status", [this](const HttpRequest &req, HttpResponse &res) {
+        HandleWebrtcStatus(req, res);
+    });
+    server_->Post("/api/webrtc/start", [this](const HttpRequest &req, HttpResponse &res) {
+        HandleWebrtcStart(req, res);
+    });
+    server_->Post("/api/webrtc/stop", [this](const HttpRequest &req, HttpResponse &res) {
+        HandleWebrtcStop(req, res);
+    });
+    server_->Post("/api/webrtc/offer", [this](const HttpRequest &req, HttpResponse &res) {
+        HandleWebrtcOffer(req, res);
+    });
+    server_->Post("/api/webrtc/answer", [this](const HttpRequest &req, HttpResponse &res) {
+        HandleWebrtcAnswer(req, res);
+    });
+    server_->Post("/api/webrtc/ice", [this](const HttpRequest &req, HttpResponse &res) {
+        HandleWebrtcIce(req, res);
+    });
+    server_->Get("/api/webrtc/candidates", [this](const HttpRequest &req, HttpResponse &res) {
+        HandleWebrtcCandidates(req, res);
+    });
+}
+
+void HttpApi::RegisterRecordRoutes() {
+    server_->Get("/api/record/status", [this](const HttpRequest &req, HttpResponse &res) {
+        HandleRecordStatus(req, res);
+    });
+    server_->Post("/api/record/start", [this](const HttpRequest &req, HttpResponse &res) {
+        HandleRecordStart(req, res);
+    });
+    server_->Post("/api/record/stop", [this](const HttpRequest &req, HttpResponse &res) {
+        HandleRecordStop(req, res);
+    });
+}
+
+void HttpApi::RegisterProducerRoutes() {
+    server_->Get("/api/producer/status", [this](const HttpRequest &req, HttpResponse &res) {
+        HandleProducerStatus(req, res);
+    });
+    server_->Post("/api/producer/switch", [this](const HttpRequest &req, HttpResponse &res) {
+        HandleProducerSwitch(req, res);
+    });
+}
+
+void HttpApi::RegisterAiRoutes() {
+    server_->Get("/api/ai/status", [this](const HttpRequest &req, HttpResponse &res) {
+        HandleAiStatus(req, res);
+    });
+    server_->Post("/api/ai/switch", [this](const HttpRequest &req, HttpResponse &res) {
+        HandleAiSwitch(req, res);
+    });
+}
+
+void HttpApi::RegisterPipelineRoutes() {
+    server_->Get("/api/pipeline/status", [this](const HttpRequest &req, HttpResponse &res) {
+        HandlePipelineStatus(req, res);
+    });
+    server_->Post("/api/pipeline/resolution", [this](const HttpRequest &req, HttpResponse &res) {
+        HandlePipelineResolution(req, res);
+    });
+}
+
+void HttpApi::RegisterModelRoutes() {
+    server_->Get("/api/model/list", [this](const HttpRequest &req, HttpResponse &res) {
+        HandleModelList(req, res);
+    });
+    server_->Post("/api/model/upload", [this](const HttpRequest &req, HttpResponse &res) {
+        HandleModelUpload(req, res);
+    });
+    server_->Delete(R"(/api/model/(.+))", [this](const HttpRequest &req, HttpResponse &res) {
+        HandleModelDelete(req, res);
+    });
+    server_->Get("/api/models/registered", [this](const HttpRequest &req, HttpResponse &res) {
+        HandleRegisteredModels(req, res);
+    });
+}
+
+void HttpApi::HandleStatus(const HttpRequest& /*req*/, HttpResponse& res) {
+    auto *mgr = GetStreamManager();
+    json data;
+
+    data["rtsp"]["enabled"] = stream_config_.enable_rtsp;
+    if (mgr && mgr->GetRtspService()) {
+        data["rtsp"]["valid"] = mgr->GetRtspService()->IsValid();
+        data["rtsp"]["running"] = mgr->GetRtspService()->IsRunning();
+    }
+
+    data["webrtc"]["enabled"] = stream_config_.enable_webrtc;
+    if (mgr && mgr->GetWebRTCService()) {
+        data["webrtc"]["running"] = mgr->GetWebRTCService()->IsRunning();
+    }
+
+    data["recording"]["enabled"] = stream_config_.enable_file;
+    if (mgr && mgr->GetFileService()) {
+        auto *fs = mgr->GetFileService();
+        data["recording"]["active"] = fs->IsRecording();
+        data["recording"]["output_dir"] = stream_config_.mp4_config.outputDir;
+    }
+
+    auto &media_mgr = media::MediaManager::Instance();
+    data["producer"]["mode"] = media::ProducerModeToString(media_mgr.GetCurrentMode());
+    data["producer"]["running"] = media_mgr.IsRunning();
+
+    res.set_content(json_response(true, "ok", data), "application/json");
+}
+
+void HttpApi::HandleRtspStatus(const HttpRequest& /*req*/, HttpResponse& res) {
+    auto *mgr = GetStreamManager();
+    if (!mgr || !mgr->GetRtspService()) {
+        res.set_content(json_response(false, "RTSP not available"), "application/json");
+        return;
+    }
+
+    auto *rtsp = mgr->GetRtspService();
+    auto stats = rtsp->GetStats();
+    json data;
+    data["valid"] = rtsp->IsValid();
+    data["running"] = rtsp->IsRunning();
+    data["url"] = rtsp->GetUrl();
+    data["frames_sent"] = stats.framesSent;
+    data["bytes_sent"] = stats.bytesSent;
+    res.set_content(json_response(true, "ok", data), "application/json");
+}
+
+void HttpApi::HandleRtspStart(const HttpRequest& /*req*/, HttpResponse& res) {
+    auto *mgr = GetStreamManager();
+    if (!mgr || !mgr->GetRtspService()) {
+        res.set_content(json_response(false, "RTSP not available"), "application/json");
+        return;
+    }
+
+    auto *rtsp = mgr->GetRtspService();
+    if (rtsp->IsRunning()) {
+        res.set_content(json_response(true, "RTSP already running"), "application/json");
+        return;
+    }
+
+    if (rtsp->Start()) {
+        res.set_content(json_response(true, "RTSP started"), "application/json");
+    } else {
+        res.set_content(json_response(false, "Failed to start RTSP"), "application/json");
+    }
+}
+
+void HttpApi::HandleRtspStop(const HttpRequest& /*req*/, HttpResponse& res) {
+    auto *mgr = GetStreamManager();
+    if (!mgr || !mgr->GetRtspService()) {
+        res.set_content(json_response(false, "RTSP not available"), "application/json");
+        return;
+    }
+
+    auto *rtsp = mgr->GetRtspService();
+    if (!rtsp->IsRunning()) {
+        res.set_content(json_response(true, "RTSP already stopped"), "application/json");
+        return;
+    }
+
+    rtsp->Stop();
+    res.set_content(json_response(true, "RTSP stopped"), "application/json");
+}
+
+void HttpApi::HandleWebrtcStatus(const HttpRequest& /*req*/, HttpResponse& res) {
+    auto *mgr = GetStreamManager();
+    if (!mgr || !mgr->GetWebRTCService()) {
+        res.set_content(json_response(false, "WebRTC not available"), "application/json");
+        return;
+    }
+
+    auto *webrtc = mgr->GetWebRTCService();
+    json data;
+    data["running"] = webrtc->IsRunning();
+    res.set_content(json_response(true, "ok", data), "application/json");
+}
+
+void HttpApi::HandleWebrtcStart(const HttpRequest& /*req*/, HttpResponse& res) {
+    auto *mgr = GetStreamManager();
+    if (!mgr || !mgr->GetWebRTCService()) {
+        res.set_content(json_response(false, "WebRTC not available"), "application/json");
+        return;
+    }
+
+    auto *webrtc = mgr->GetWebRTCService();
+    if (webrtc->IsRunning()) {
+        res.set_content(json_response(true, "WebRTC already running"), "application/json");
+        return;
+    }
+
+    if (webrtc->Start()) {
+        res.set_content(json_response(true, "WebRTC started"), "application/json");
+    } else {
+        res.set_content(json_response(false, "Failed to start WebRTC"), "application/json");
+    }
+}
+
+void HttpApi::HandleWebrtcStop(const HttpRequest& /*req*/, HttpResponse& res) {
+    auto *mgr = GetStreamManager();
+    if (!mgr || !mgr->GetWebRTCService()) {
+        res.set_content(json_response(false, "WebRTC not available"), "application/json");
+        return;
+    }
+
+    auto *webrtc = mgr->GetWebRTCService();
+    if (!webrtc->IsRunning()) {
+        res.set_content(json_response(true, "WebRTC already stopped"), "application/json");
+        return;
+    }
+
+    webrtc->Stop();
+    res.set_content(json_response(true, "WebRTC stopped"), "application/json");
+}
+
+void HttpApi::HandleWebrtcOffer(const HttpRequest& /*req*/, HttpResponse& res) {
+    auto *mgr = GetStreamManager();
+    if (!mgr || !mgr->GetWebRTCService()) {
+        res.set_content(json_response(false, "WebRTC not available"), "application/json");
+        return;
+    }
+
+    auto *webrtc = mgr->GetWebRTCService();
+    if (!webrtc->IsRunning()) {
+        res.set_content(json_response(false, "WebRTC service not running"), "application/json");
+        return;
+    }
+
+    try {
+        std::string offer = webrtc->CreateOfferForHttp();
+        if (offer.empty()) {
+            res.set_content(json_response(false, "Failed to create offer"), "application/json");
             return;
         }
 
-        auto *rtsp = mgr->GetRtspService();
-        if (rtsp->IsRunning()) {
-            res.set_content(json_response(true, "RTSP already running"), "application/json");
+        json data;
+        data["sdp"] = offer;
+        data["type"] = "offer";
+        res.set_content(json_response(true, "ok", data), "application/json");
+    } catch (const std::exception &e) {
+        res.set_content(json_response(false, std::string("Error: ") + e.what()), "application/json");
+    }
+}
+
+void HttpApi::HandleWebrtcAnswer(const HttpRequest& req, HttpResponse& res) {
+    auto *mgr = GetStreamManager();
+    if (!mgr || !mgr->GetWebRTCService()) {
+        res.set_content(json_response(false, "WebRTC not available"), "application/json");
+        return;
+    }
+
+    auto *webrtc = mgr->GetWebRTCService();
+    try {
+        json body = json::parse(req.body);
+        std::string sdp = body.value("sdp", "");
+
+        if (sdp.empty()) {
+            res.set_content(json_response(false, "Missing SDP"), "application/json");
             return;
         }
 
-        if (rtsp->Start()) {
-            res.set_content(json_response(true, "RTSP started"), "application/json");
+        if (webrtc->SetAnswerFromHttp(sdp)) {
+            res.set_content(json_response(true, "Answer set"), "application/json");
         } else {
-            res.set_content(json_response(false, "Failed to start RTSP"), "application/json");
+            res.set_content(json_response(false, "Failed to set answer"), "application/json");
         }
-    });
+    } catch (const json::exception &e) {
+        res.set_content(json_response(false, std::string("Invalid JSON: ") + e.what()), "application/json");
+    }
+}
 
-    server_->Post("/api/rtsp/stop", [](const HttpRequest & /*req*/, HttpResponse &res) {
-        auto *mgr = GetStreamManager();
-        if (!mgr || !mgr->GetRtspService()) {
-            res.set_content(json_response(false, "RTSP not available"), "application/json");
+void HttpApi::HandleWebrtcIce(const HttpRequest& req, HttpResponse& res) {
+    auto *mgr = GetStreamManager();
+    if (!mgr || !mgr->GetWebRTCService()) {
+        res.set_content(json_response(false, "WebRTC not available"), "application/json");
+        return;
+    }
+
+    auto *webrtc = mgr->GetWebRTCService();
+    try {
+        json body = json::parse(req.body);
+        std::string candidate = body.value("candidate", "");
+        std::string mid = body.value("sdpMid", "0");
+
+        if (candidate.empty()) {
+            res.set_content(json_response(true, "ICE gathering complete"), "application/json");
             return;
         }
 
-        auto *rtsp = mgr->GetRtspService();
-        if (!rtsp->IsRunning()) {
-            res.set_content(json_response(true, "RTSP already stopped"), "application/json");
-            return;
-        }
-
-        rtsp->Stop();
-        res.set_content(json_response(true, "RTSP stopped"), "application/json");
-    });
-
-    // ========================================================================
-    // WebRTC 状态和控制 API
-    // ========================================================================
-    server_->Get("/api/webrtc/status", [](const HttpRequest & /*req*/, HttpResponse &res) {
-        auto *mgr = GetStreamManager();
-        if (!mgr || !mgr->GetWebRTCService()) {
-            res.set_content(json_response(false, "WebRTC not available"), "application/json");
-            return;
-        }
-
-        auto *webrtc = mgr->GetWebRTCService();
-        json data;
-        data["running"] = webrtc->IsRunning();
-        res.set_content(json_response(true, "ok", data), "application/json");
-    });
-
-    server_->Post("/api/webrtc/start", [](const HttpRequest & /*req*/, HttpResponse &res) {
-        auto *mgr = GetStreamManager();
-        if (!mgr || !mgr->GetWebRTCService()) {
-            res.set_content(json_response(false, "WebRTC not available"), "application/json");
-            return;
-        }
-
-        auto *webrtc = mgr->GetWebRTCService();
-        if (webrtc->IsRunning()) {
-            res.set_content(json_response(true, "WebRTC already running"), "application/json");
-            return;
-        }
-
-        if (webrtc->Start()) {
-            res.set_content(json_response(true, "WebRTC started"), "application/json");
+        if (webrtc->AddIceCandidateFromHttp(candidate, mid)) {
+            res.set_content(json_response(true, "ICE candidate added"), "application/json");
         } else {
-            res.set_content(json_response(false, "Failed to start WebRTC"), "application/json");
+            res.set_content(json_response(false, "Failed to add ICE candidate"), "application/json");
         }
-    });
+    } catch (const json::exception &e) {
+        res.set_content(json_response(false, std::string("Invalid JSON: ") + e.what()), "application/json");
+    }
+}
 
-    server_->Post("/api/webrtc/stop", [](const HttpRequest & /*req*/, HttpResponse &res) {
-        auto *mgr = GetStreamManager();
-        if (!mgr || !mgr->GetWebRTCService()) {
-            res.set_content(json_response(false, "WebRTC not available"), "application/json");
-            return;
-        }
+void HttpApi::HandleWebrtcCandidates(const HttpRequest& /*req*/, HttpResponse& res) {
+    auto *mgr = GetStreamManager();
+    if (!mgr || !mgr->GetWebRTCService()) {
+        res.set_content(json_response(false, "WebRTC not available"), "application/json");
+        return;
+    }
 
-        auto *webrtc = mgr->GetWebRTCService();
-        if (!webrtc->IsRunning()) {
-            res.set_content(json_response(true, "WebRTC already stopped"), "application/json");
-            return;
-        }
+    auto *webrtc = mgr->GetWebRTCService();
+    auto candidates = webrtc->GetLocalIceCandidates();
 
-        webrtc->Stop();
-        res.set_content(json_response(true, "WebRTC stopped"), "application/json");
-    });
+    json data = json::array();
+    for (const auto &[candidate, mid]: candidates) {
+        json c;
+        c["candidate"] = candidate;
+        c["sdpMid"] = mid;
+        data.push_back(c);
+    }
 
-    // ========================================================================
-    // WebRTC HTTP 信令 API
-    // ========================================================================
-    server_->Post("/api/webrtc/offer", [](const HttpRequest & /*req*/, HttpResponse &res) {
-        auto *mgr = GetStreamManager();
-        if (!mgr || !mgr->GetWebRTCService()) {
-            res.set_content(json_response(false, "WebRTC not available"), "application/json");
-            return;
-        }
+    res.set_content(json_response(true, "ok", data), "application/json");
+}
 
-        auto *webrtc = mgr->GetWebRTCService();
-        if (!webrtc->IsRunning()) {
-            res.set_content(json_response(false, "WebRTC service not running"), "application/json");
-            return;
-        }
+void HttpApi::HandleRecordStatus(const HttpRequest& /*req*/, HttpResponse& res) {
+    auto *mgr = GetStreamManager();
+    if (!mgr || !mgr->GetFileService()) {
+        res.set_content(json_response(false, "Recording not available"), "application/json");
+        return;
+    }
 
-        try {
-            std::string offer = webrtc->CreateOfferForHttp();
-            if (offer.empty()) {
-                res.set_content(json_response(false, "Failed to create offer"), "application/json");
-                return;
-            }
+    auto *fs = mgr->GetFileService();
+    json data;
+    data["enabled"] = stream_config_.enable_file;
+    data["active"] = fs->IsRecording();
+    data["output_dir"] = stream_config_.mp4_config.outputDir;
 
+    if (fs->IsRecording()) {
+        auto stats = fs->GetRecordStats();
+        data["stats"]["frames_written"] = stats.frames_written;
+        data["stats"]["bytes_written"] = stats.bytes_written;
+        data["stats"]["duration_sec"] = stats.duration_sec;
+    }
+
+    res.set_content(json_response(true, "ok", data), "application/json");
+}
+
+void HttpApi::HandleRecordStart(const HttpRequest& /*req*/, HttpResponse& res) {
+    auto *mgr = GetStreamManager();
+    if (!mgr || !mgr->GetFileService()) {
+        res.set_content(json_response(false, "Recording not available"), "application/json");
+        return;
+    }
+
+    auto *fs = mgr->GetFileService();
+    if (fs->IsRecording()) {
+        res.set_content(json_response(true, "Recording already active"), "application/json");
+        return;
+    }
+
+    if (fs->StartRecording()) {
+        res.set_content(json_response(true, "Recording started"), "application/json");
+    } else {
+        res.set_content(json_response(false, "Failed to start recording"), "application/json");
+    }
+}
+
+void HttpApi::HandleRecordStop(const HttpRequest& /*req*/, HttpResponse& res) {
+    auto *mgr = GetStreamManager();
+    if (!mgr || !mgr->GetFileService()) {
+        res.set_content(json_response(false, "Recording not available"), "application/json");
+        return;
+    }
+
+    auto *fs = mgr->GetFileService();
+    if (!fs->IsRecording()) {
+        res.set_content(json_response(true, "Recording already stopped"), "application/json");
+        return;
+    }
+
+    fs->StopRecording();
+    res.set_content(json_response(true, "Recording stopped"), "application/json");
+}
+
+void HttpApi::HandleProducerStatus(const HttpRequest& /*req*/, HttpResponse& res) {
+    auto &mgr = media::MediaManager::Instance();
+
+    json data;
+    data["mode"] = media::ProducerModeToString(mgr.GetCurrentMode());
+    data["running"] = mgr.IsRunning();
+    data["available_modes"] = json::array({"simple_ipc"});
+
+    res.set_content(json_response(true, "ok", data), "application/json");
+}
+
+void HttpApi::HandleProducerSwitch(const HttpRequest& req, HttpResponse& res) {
+    try {
+        json body = json::parse(req.body);
+        std::string mode_str = body.value("mode", "simple_ipc");
+
+        LOG_INFO("Producer mode switch requested: {}", mode_str);
+
+        if (mode_str == "simple_ipc") {
             json data;
-            data["sdp"] = offer;
-            data["type"] = "offer";
-            res.set_content(json_response(true, "ok", data), "application/json");
-        } catch (const std::exception &e) {
-            res.set_content(json_response(false, std::string("Error: ") + e.what()), "application/json");
-        }
-    });
-
-    server_->Post("/api/webrtc/answer", [](const HttpRequest &req, HttpResponse &res) {
-        auto *mgr = GetStreamManager();
-        if (!mgr || !mgr->GetWebRTCService()) {
-            res.set_content(json_response(false, "WebRTC not available"), "application/json");
+            data["mode"] = media::ProducerModeToString(media::ProducerMode::SimpleIPC);
+            res.set_content(json_response(true, "Already in requested mode", data), "application/json");
             return;
         }
 
-        auto *webrtc = mgr->GetWebRTCService();
+        res.set_content(json_response(false, "Unsupported producer mode"), "application/json");
+    } catch (const json::exception &e) {
+        res.set_content(json_response(false, std::string("Invalid JSON: ") + e.what()), "application/json");
+    }
+}
 
-        try {
-            json body = json::parse(req.body);
-            std::string sdp = body.value("sdp", "");
+void HttpApi::HandleAiStatus(const HttpRequest& /*req*/, HttpResponse& res) {
+    json data;
+    data["has_model"] = false;
+    data["model_type"] = "none";
 
-            if (sdp.empty()) {
-                res.set_content(json_response(false, "Missing SDP"), "application/json");
-                return;
-            }
+    json stats;
+    stats["frames_processed"] = 0;
+    stats["avg_inference_ms"] = 0;
+    stats["total_detections"] = 0;
+    data["stats"] = stats;
 
-            if (webrtc->SetAnswerFromHttp(sdp)) {
-                res.set_content(json_response(true, "Answer set"), "application/json");
-            } else {
-                res.set_content(json_response(false, "Failed to set answer"), "application/json");
-            }
-        } catch (const json::exception &e) {
-            res.set_content(json_response(false, std::string("Invalid JSON: ") + e.what()), "application/json");
-        }
-    });
+    res.set_content(json_response(true, "ok", data), "application/json");
+}
 
-    server_->Post("/api/webrtc/ice", [](const HttpRequest &req, HttpResponse &res) {
-        auto *mgr = GetStreamManager();
-        if (!mgr || !mgr->GetWebRTCService()) {
-            res.set_content(json_response(false, "WebRTC not available"), "application/json");
-            return;
-        }
+void HttpApi::HandleAiSwitch(const HttpRequest& req, HttpResponse& res) {
+    try {
+        json body = json::parse(req.body);
+        std::string model_str = body.value("model", "none");
 
-        auto *webrtc = mgr->GetWebRTCService();
+        LOG_INFO("AI model switch requested: {}", model_str);
 
-        try {
-            json body = json::parse(req.body);
-            std::string candidate = body.value("candidate", "");
-            std::string mid = body.value("sdpMid", "0");
-
-            if (candidate.empty()) {
-                // 空候选表示 ICE 收集完成
-                res.set_content(json_response(true, "ICE gathering complete"), "application/json");
-                return;
-            }
-
-            if (webrtc->AddIceCandidateFromHttp(candidate, mid)) {
-                res.set_content(json_response(true, "ICE candidate added"), "application/json");
-            } else {
-                res.set_content(json_response(false, "Failed to add ICE candidate"), "application/json");
-            }
-        } catch (const json::exception &e) {
-            res.set_content(json_response(false, std::string("Invalid JSON: ") + e.what()), "application/json");
-        }
-    });
-
-    server_->Get("/api/webrtc/candidates", [](const HttpRequest & /*req*/, HttpResponse &res) {
-        auto *mgr = GetStreamManager();
-        if (!mgr || !mgr->GetWebRTCService()) {
-            res.set_content(json_response(false, "WebRTC not available"), "application/json");
-            return;
-        }
-
-        auto *webrtc = mgr->GetWebRTCService();
-        auto candidates = webrtc->GetLocalIceCandidates();
-
-        json data = json::array();
-        for (const auto &[candidate, mid]: candidates) {
-            json c;
-            c["candidate"] = candidate;
-            c["sdpMid"] = mid;
-            data.push_back(c);
-        }
-
-        res.set_content(json_response(true, "ok", data), "application/json");
-    });
-
-    // ========================================================================
-    // 录制状态和控制 API
-    // ========================================================================
-    server_->Get("/api/record/status", [this](const HttpRequest & /*req*/, HttpResponse &res) {
-        auto *mgr = GetStreamManager();
-        if (!mgr || !mgr->GetFileService()) {
-            res.set_content(json_response(false, "Recording not available"), "application/json");
-            return;
-        }
-
-        auto *fs = mgr->GetFileService();
-        json data;
-        data["enabled"] = stream_config_.enable_file;
-        data["active"] = fs->IsRecording();
-        data["output_dir"] = stream_config_.mp4_config.outputDir;
-
-        if (fs->IsRecording()) {
-            auto stats = fs->GetRecordStats();
-            data["stats"]["frames_written"] = stats.frames_written;
-            data["stats"]["bytes_written"] = stats.bytes_written;
-            data["stats"]["duration_sec"] = stats.duration_sec;
-        }
-
-        res.set_content(json_response(true, "ok", data), "application/json");
-    });
-
-    server_->Post("/api/record/start", [](const HttpRequest & /*req*/, HttpResponse &res) {
-        auto *mgr = GetStreamManager();
-        if (!mgr || !mgr->GetFileService()) {
-            res.set_content(json_response(false, "Recording not available"), "application/json");
-            return;
-        }
-
-        auto *fs = mgr->GetFileService();
-        if (fs->IsRecording()) {
-            res.set_content(json_response(true, "Recording already active"), "application/json");
-            return;
-        }
-
-        if (fs->StartRecording()) {
-            res.set_content(json_response(true, "Recording started"), "application/json");
+        if (model_str == "none" || model_str == "simple_ipc" || model_str.empty()) {
+            json data;
+            data["model"] = "none";
+            res.set_content(json_response(true, "AI model disabled", data), "application/json");
         } else {
-            res.set_content(json_response(false, "Failed to start recording"), "application/json");
+            res.set_content(json_response(false, "Unsupported AI model"), "application/json");
         }
-    });
+    } catch (const json::exception &e) {
+        res.set_content(json_response(false, std::string("Invalid JSON: ") + e.what()), "application/json");
+    }
+}
 
-    server_->Post("/api/record/stop", [](const HttpRequest & /*req*/, HttpResponse &res) {
-        auto *mgr = GetStreamManager();
-        if (!mgr || !mgr->GetFileService()) {
-            res.set_content(json_response(false, "Recording not available"), "application/json");
-            return;
-        }
+void HttpApi::HandlePipelineStatus(const HttpRequest& /*req*/, HttpResponse& res) {
+    auto &mgr = media::MediaManager::Instance();
+    auto cfg = mgr.GetConfig();
+    auto sipc_res = mgr.GetSIPCResolution();
+    auto res_cfg = media::simple_ipc::ResolutionConfig::FromPreset(sipc_res);
+    res_cfg.framerate = cfg.framerate;
 
-        auto *fs = mgr->GetFileService();
-        if (!fs->IsRecording()) {
-            res.set_content(json_response(true, "Recording already stopped"), "application/json");
-            return;
-        }
+    json data;
+    data["mode"] = "parallel";
 
-        fs->StopRecording();
-        res.set_content(json_response(true, "Recording stopped"), "application/json");
-    });
+    json resolution;
+    if (sipc_res == media::simple_ipc::Resolution::R_1080P) {
+        resolution["preset"] = "1080p";
+    } else if (sipc_res == media::simple_ipc::Resolution::R_720P) {
+        resolution["preset"] = "720p";
+    } else {
+        resolution["preset"] = "480p";
+    }
+    resolution["width"] = res_cfg.width;
+    resolution["height"] = res_cfg.height;
+    resolution["framerate"] = res_cfg.framerate;
+    data["resolution"] = resolution;
 
-    // ========================================================================
-    // 生产者模式 API（基于新的 MediaManager）
-    // ========================================================================
-    server_->Get("/api/producer/status", [](const HttpRequest & /*req*/, HttpResponse &res) {
-        auto &mgr = media::MediaManager::Instance();
+    data["initialized"] = mgr.IsInitialized();
+    data["streaming"] = mgr.IsRunning();
+    data["available_resolutions"] = json::array({"1080p", "720p", "480p"});
+    data["note"] = "";
 
-        json data;
-        data["mode"] = media::ProducerModeToString(mgr.GetCurrentMode());
-        data["running"] = mgr.IsRunning();
-        data["available_modes"] = json::array({"simple_ipc"});
+    res.set_content(json_response(true, "ok", data), "application/json");
+}
 
-        res.set_content(json_response(true, "ok", data), "application/json");
-    });
+void HttpApi::HandlePipelineResolution(const HttpRequest& req, HttpResponse& res) {
+    try {
+        json body = json::parse(req.body);
+        std::string preset_str = body.value("resolution", "1080p");
 
-    server_->Post("/api/producer/switch", [](const HttpRequest &req, HttpResponse &res) {
-        try {
-            json body = json::parse(req.body);
-            std::string mode_str = body.value("mode", "simple_ipc");
+        LOG_INFO("Resolution switch requested: {}", preset_str);
 
-            LOG_INFO("Producer mode switch requested: {}", mode_str);
-
-            if (mode_str == "simple_ipc") {
-                json data;
-                data["mode"] = media::ProducerModeToString(media::ProducerMode::SimpleIPC);
-                res.set_content(json_response(true, "Already in requested mode", data), "application/json");
-                return;
-            }
-
-            res.set_content(json_response(false, "Unsupported producer mode"), "application/json");
-
-        } catch (const json::exception &e) {
-            res.set_content(json_response(false, std::string("Invalid JSON: ") + e.what()), "application/json");
-        }
-    });
-
-    // ========================================================================
-    // AI API（前端兼容接口）
-    // ========================================================================
-    server_->Get("/api/ai/status", [](const HttpRequest & /*req*/, HttpResponse &res) {
-        json data;
-        data["has_model"] = false;
-        data["model_type"] = "none";
-
-        // stats: AI 统计信息（当前未实现详细统计，返回占位数据）
-        json stats;
-        stats["frames_processed"] = 0;
-        stats["avg_inference_ms"] = 0;
-        stats["total_detections"] = 0;
-        data["stats"] = stats;
-
-        res.set_content(json_response(true, "ok", data), "application/json");
-    });
-
-    server_->Post("/api/ai/switch", [](const HttpRequest &req, HttpResponse &res) {
-        try {
-            json body = json::parse(req.body);
-            std::string model_str = body.value("model", "none");
-
-            LOG_INFO("AI model switch requested: {}", model_str);
-
-            if (model_str == "none" || model_str == "simple_ipc" || model_str.empty()) {
-                json data;
-                data["model"] = "none";
-                res.set_content(json_response(true, "AI model disabled", data), "application/json");
-            } else {
-                res.set_content(json_response(false, "Unsupported AI model"), "application/json");
-            }
-
-        } catch (const json::exception &e) {
-            res.set_content(json_response(false, std::string("Invalid JSON: ") + e.what()), "application/json");
-        }
-    });
-
-    // ========================================================================
-    // Pipeline API（前端兼容接口）
-    // ========================================================================
-    server_->Get("/api/pipeline/status", [](const HttpRequest & /*req*/, HttpResponse &res) {
-        auto &mgr = media::MediaManager::Instance();
-        auto cfg = mgr.GetConfig();
-        auto sipc_res = mgr.GetSIPCResolution();
-        auto res_cfg = media::simple_ipc::ResolutionConfig::FromPreset(sipc_res);
-        res_cfg.framerate = cfg.framerate;
-
-        json data;
-
-        // mode: parallel (纯 IPC)
-        data["mode"] = "parallel";
-
-        // resolution 信息
-        json resolution;
-        if (sipc_res == media::simple_ipc::Resolution::R_1080P) {
-            resolution["preset"] = "1080p";
-        } else if (sipc_res == media::simple_ipc::Resolution::R_720P) {
-            resolution["preset"] = "720p";
+        media::simple_ipc::Resolution target_res;
+        if (preset_str == "720p") {
+            target_res = media::simple_ipc::Resolution::R_720P;
+        } else if (preset_str == "480p") {
+            target_res = media::simple_ipc::Resolution::R_480P;
         } else {
-            resolution["preset"] = "480p";
+            target_res = media::simple_ipc::Resolution::R_1080P;
         }
-        resolution["width"] = res_cfg.width;
-        resolution["height"] = res_cfg.height;
-        resolution["framerate"] = res_cfg.framerate;
-        data["resolution"] = resolution;
 
-        // 状态信息
-        data["initialized"] = mgr.IsInitialized();
-        data["streaming"] = mgr.IsRunning();
+        auto &mgr = media::MediaManager::Instance();
+        if (mgr.GetCurrentMode() != media::ProducerMode::SimpleIPC) {
+            res.set_content(json_response(false, "Resolution switching is only available in SimpleIPC mode"),
+                            "application/json");
+            return;
+        }
 
-        // 可用分辨率
-        data["available_resolutions"] = json::array({"1080p", "720p", "480p"});
-        data["note"] = "";
-
-        res.set_content(json_response(true, "ok", data), "application/json");
-    });
-
-    server_->Post("/api/pipeline/resolution", [](const HttpRequest &req, HttpResponse &res) {
-        try {
-            json body = json::parse(req.body);
-            std::string preset_str = body.value("resolution", "1080p");
-
-            LOG_INFO("Resolution switch requested: {}", preset_str);
-
-            // 解析分辨率预设
-            media::simple_ipc::Resolution target_res;
-            if (preset_str == "720p") {
-                target_res = media::simple_ipc::Resolution::R_720P;
-            } else if (preset_str == "480p") {
-                target_res = media::simple_ipc::Resolution::R_480P;
-            } else {
-                target_res = media::simple_ipc::Resolution::R_1080P;
-            }
-
-            auto &mgr = media::MediaManager::Instance();
-
-            if (mgr.GetCurrentMode() != media::ProducerMode::SimpleIPC) {
-                res.set_content(json_response(false, "Resolution switching is only available in SimpleIPC mode"),
-                                "application/json");
-                return;
-            }
-
-            if (mgr.GetSIPCResolution() == target_res) {
-                auto res_cfg = media::simple_ipc::ResolutionConfig::FromPreset(target_res);
-                json data;
-                data["resolution"] = preset_str;
-                data["width"] = res_cfg.width;
-                data["height"] = res_cfg.height;
-                res.set_content(json_response(true, "Already using requested resolution", data), "application/json");
-                return;
-            }
-
-            // 切换分辨率（需要重新初始化）
-            if (mgr.SetResolution(target_res) != 0) {
-                res.set_content(json_response(false, "Failed to switch resolution"), "application/json");
-                return;
-            }
-
+        if (mgr.GetSIPCResolution() == target_res) {
             auto res_cfg = media::simple_ipc::ResolutionConfig::FromPreset(target_res);
             json data;
             data["resolution"] = preset_str;
             data["width"] = res_cfg.width;
             data["height"] = res_cfg.height;
-            res.set_content(json_response(true, "Resolution switched", data), "application/json");
-
-        } catch (const json::exception &e) {
-            res.set_content(json_response(false, std::string("Invalid JSON: ") + e.what()), "application/json");
-        }
-    });
-
-    // ========================================================================
-    // 模型文件管理 API
-    // ========================================================================
-
-    // 列出所有模型文件
-    server_->Get("/api/model/list", [](const HttpRequest & /*req*/, HttpResponse &res) {
-        namespace fs = std::filesystem;
-        json models = json::array();
-
-        try {
-            for (const auto &entry: fs::directory_iterator(MODEL_DIR)) {
-                if (!entry.is_regular_file())
-                    continue;
-                auto ext = entry.path().extension().string();
-                // 小写化扩展名
-                std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-                if (ext == ".rknn" || ext == ".txt") {
-                    json item;
-                    item["name"] = entry.path().filename().string();
-                    item["size"] = entry.file_size();
-                    item["type"] = ext.substr(1); // "rknn" or "txt"
-                    models.push_back(item);
-                }
-            }
-        } catch (const fs::filesystem_error &e) {
-            res.set_content(json_response(false, std::string("Failed to list models: ") + e.what()),
-                            "application/json");
+            res.set_content(json_response(true, "Already using requested resolution", data), "application/json");
             return;
         }
 
-        res.set_content(json_response(true, "ok", models), "application/json");
-    });
-
-    // 上传模型文件
-    server_->Post("/api/model/upload", [](const HttpRequest &req, HttpResponse &res) {
-        if (!req.form.has_file("file")) {
-            res.set_content(json_response(false, "No file in request"), "application/json");
+        if (mgr.SetResolution(target_res) != 0) {
+            res.set_content(json_response(false, "Failed to switch resolution"), "application/json");
             return;
         }
 
-        const auto &file = req.form.get_file("file");
-        std::string filename = SanitizeFilename(file.filename);
-
-        if (filename.empty()) {
-            res.set_content(json_response(false, "Invalid filename"), "application/json");
-            return;
-        }
-
-        // 仅允许 .rknn 和 .txt 后缀
-        std::string ext = filename.substr(filename.find_last_of('.') + 1);
-        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-        if (ext != "rknn" && ext != "txt") {
-            res.set_content(json_response(false, "Only .rknn and .txt files are allowed"), "application/json");
-            return;
-        }
-
-        // 文件大小限制
-        if (file.content.size() > MAX_UPLOAD_SIZE) {
-            res.set_content(json_response(false, "File too large (max 50MB)"), "application/json");
-            return;
-        }
-
-        std::string path = MODEL_DIR + "/" + filename;
-        std::ofstream ofs(path, std::ios::binary);
-        if (!ofs) {
-            res.set_content(json_response(false, "Failed to write file"), "application/json");
-            return;
-        }
-        ofs.write(file.content.data(), static_cast<std::streamsize>(file.content.size()));
-        ofs.close();
-
+        auto res_cfg = media::simple_ipc::ResolutionConfig::FromPreset(target_res);
         json data;
-        data["name"] = filename;
-        data["size"] = file.content.size();
-        LOG_INFO("Model file uploaded: {} ({} bytes)", filename, file.content.size());
-        res.set_content(json_response(true, "File uploaded", data), "application/json");
-    });
+        data["resolution"] = preset_str;
+        data["width"] = res_cfg.width;
+        data["height"] = res_cfg.height;
+        res.set_content(json_response(true, "Resolution switched", data), "application/json");
+    } catch (const json::exception &e) {
+        res.set_content(json_response(false, std::string("Invalid JSON: ") + e.what()), "application/json");
+    }
+}
 
-    // 删除模型文件
-    server_->Delete(R"(/api/model/(.+))", [](const HttpRequest &req, HttpResponse &res) {
-        std::string filename = SanitizeFilename(req.matches[1].str());
+void HttpApi::HandleModelList(const HttpRequest& /*req*/, HttpResponse& res) {
+    namespace fs = std::filesystem;
+    json models = json::array();
 
-        if (filename.empty()) {
-            res.set_content(json_response(false, "Invalid filename"), "application/json");
-            return;
+    try {
+        for (const auto &entry: fs::directory_iterator(MODEL_DIR)) {
+            if (!entry.is_regular_file()) {
+                continue;
+            }
+            auto ext = entry.path().extension().string();
+            std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+            if (ext == ".rknn" || ext == ".txt") {
+                json item;
+                item["name"] = entry.path().filename().string();
+                item["size"] = entry.file_size();
+                item["type"] = ext.substr(1);
+                models.push_back(item);
+            }
         }
+    } catch (const fs::filesystem_error &e) {
+        res.set_content(json_response(false, std::string("Failed to list models: ") + e.what()),
+                        "application/json");
+        return;
+    }
 
-        std::string path = MODEL_DIR + "/" + filename;
-        if (!std::filesystem::exists(path)) {
-            res.set_content(json_response(false, "File not found"), "application/json");
-            return;
-        }
+    res.set_content(json_response(true, "ok", models), "application/json");
+}
 
-        std::filesystem::remove(path);
-        LOG_INFO("Model file deleted: {}", filename);
-        res.set_content(json_response(true, "File deleted"), "application/json");
-    });
+void HttpApi::HandleModelUpload(const HttpRequest& req, HttpResponse& res) {
+    if (!req.form.has_file("file")) {
+        res.set_content(json_response(false, "No file in request"), "application/json");
+        return;
+    }
 
-    // ========================================================================
-    // 注册模型列表 API
-    // ========================================================================
+    const auto &file = req.form.get_file("file");
+    std::string filename = SanitizeFilename(file.filename);
 
-    // 获取 C++ 注册的可用模型类型列表
-    server_->Get("/api/models/registered", [](const HttpRequest & /*req*/, HttpResponse &res) {
-        json list = json::array();
-        res.set_content(json_response(true, "ok", list), "application/json");
-    });
+    if (filename.empty()) {
+        res.set_content(json_response(false, "Invalid filename"), "application/json");
+        return;
+    }
 
-    LOG_INFO("HTTP API 路由配置完成");
+    std::string ext = filename.substr(filename.find_last_of('.') + 1);
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+    if (ext != "rknn" && ext != "txt") {
+        res.set_content(json_response(false, "Only .rknn and .txt files are allowed"), "application/json");
+        return;
+    }
+
+    if (file.content.size() > MAX_UPLOAD_SIZE) {
+        res.set_content(json_response(false, "File too large (max 50MB)"), "application/json");
+        return;
+    }
+
+    std::string path = MODEL_DIR + "/" + filename;
+    std::ofstream ofs(path, std::ios::binary);
+    if (!ofs) {
+        res.set_content(json_response(false, "Failed to write file"), "application/json");
+        return;
+    }
+    ofs.write(file.content.data(), static_cast<std::streamsize>(file.content.size()));
+    ofs.close();
+
+    json data;
+    data["name"] = filename;
+    data["size"] = file.content.size();
+    LOG_INFO("Model file uploaded: {} ({} bytes)", filename, file.content.size());
+    res.set_content(json_response(true, "File uploaded", data), "application/json");
+}
+
+void HttpApi::HandleModelDelete(const HttpRequest& req, HttpResponse& res) {
+    std::string filename = SanitizeFilename(req.matches[1].str());
+
+    if (filename.empty()) {
+        res.set_content(json_response(false, "Invalid filename"), "application/json");
+        return;
+    }
+
+    std::string path = MODEL_DIR + "/" + filename;
+    if (!std::filesystem::exists(path)) {
+        res.set_content(json_response(false, "File not found"), "application/json");
+        return;
+    }
+
+    std::filesystem::remove(path);
+    LOG_INFO("Model file deleted: {}", filename);
+    res.set_content(json_response(true, "File deleted"), "application/json");
+}
+
+void HttpApi::HandleRegisteredModels(const HttpRequest& /*req*/, HttpResponse& res) {
+    json list = json::array();
+    res.set_content(json_response(true, "ok", list), "application/json");
 }

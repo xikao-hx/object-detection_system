@@ -13,12 +13,6 @@
 #define LOG_TAG "webrtc_service"
 
 // ============================================================================
-// 全局实例
-// ============================================================================
-
-static std::unique_ptr<WebRTCService> g_webrtc_service;
-
-// ============================================================================
 // WebRTCService 实现
 // ============================================================================
 
@@ -111,13 +105,6 @@ WebRTCStats WebRTCService::GetStats() const {
     return webrtc_ ? webrtc_->GetStats() : WebRTCStats{};
 }
 
-void WebRTCService::StreamConsumer(EncodedStreamPtr stream, void* user_data) {
-    auto* self = static_cast<WebRTCService*>(user_data);
-    if (self) {
-        self->SendVideoFrame(stream);
-    }
-}
-
 void WebRTCService::SendVideoFrame(const EncodedStreamPtr& stream) {
     if (!IsConnected() || !stream || !stream->pstPack) {
         return;
@@ -180,24 +167,3 @@ std::vector<std::pair<std::string, std::string>> WebRTCService::GetLocalIceCandi
     }
     return webrtc_->GetLocalIceCandidates();
 }
-
-// ============================================================================
-// 全局实例管理实现
-// ============================================================================
-
-WebRTCService* GetWebRTCService() {
-    return g_webrtc_service.get();
-}
-
-void CreateWebRTCService(const WebRTCServiceConfig& config) {
-    if (g_webrtc_service) {
-        LOG_WARN("WebRTC 服务实例已存在");
-        return;
-    }
-    g_webrtc_service = std::make_unique<WebRTCService>(config);
-}
-
-void DestroyWebRTCService() {
-    g_webrtc_service.reset();
-}
-

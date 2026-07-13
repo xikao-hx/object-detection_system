@@ -11,8 +11,6 @@
 #include "rtsp_service.h"
 #include "common/logger.h"
 
-#include <memory>
-
 // ============================================================================
 // RtspService 实现
 // ============================================================================
@@ -72,35 +70,9 @@ RtspServer::Stats RtspService::GetStats() const {
     return GetRtspServer().GetStats();
 }
 
-void RtspService::StreamConsumer(EncodedStreamPtr stream, void* user_data) {
-    auto* self = static_cast<RtspService*>(user_data);
-    
+void RtspService::OnEncodedStream(const EncodedStreamPtr& stream) {
     // 只有在运行状态下才推送帧
-    if (self && self->running_) {
+    if (running_) {
         rtsp_stream_consumer(stream, nullptr);
     }
 }
-
-// ============================================================================
-// 全局实例管理
-// ============================================================================
-
-static std::unique_ptr<RtspService> g_rtsp_service;
-
-RtspService* GetRtspService() {
-    return g_rtsp_service.get();
-}
-
-void CreateRtspService(const RtspConfig& config) {
-    if (g_rtsp_service) {
-        LOG_WARN("Global RtspService already exists, destroying old one");
-        DestroyRtspService();
-    }
-    
-    g_rtsp_service = std::make_unique<RtspService>(config);
-}
-
-void DestroyRtspService() {
-    g_rtsp_service.reset();
-}
-

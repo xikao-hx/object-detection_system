@@ -89,6 +89,39 @@ private:
      * @brief 设置 API 路由
      */
     void SetupRoutes();
+    void RegisterSystemRoutes();
+    void RegisterRtspRoutes();
+    void RegisterWebrtcRoutes();
+    void RegisterRecordRoutes();
+    void RegisterProducerRoutes();
+    void RegisterAiRoutes();
+    void RegisterPipelineRoutes();
+    void RegisterModelRoutes();
+
+    void HandleStatus(const HttpRequest& req, HttpResponse& res);
+    void HandleRtspStatus(const HttpRequest& req, HttpResponse& res);
+    void HandleRtspStart(const HttpRequest& req, HttpResponse& res);
+    void HandleRtspStop(const HttpRequest& req, HttpResponse& res);
+    void HandleWebrtcStatus(const HttpRequest& req, HttpResponse& res);
+    void HandleWebrtcStart(const HttpRequest& req, HttpResponse& res);
+    void HandleWebrtcStop(const HttpRequest& req, HttpResponse& res);
+    void HandleWebrtcOffer(const HttpRequest& req, HttpResponse& res);
+    void HandleWebrtcAnswer(const HttpRequest& req, HttpResponse& res);
+    void HandleWebrtcIce(const HttpRequest& req, HttpResponse& res);
+    void HandleWebrtcCandidates(const HttpRequest& req, HttpResponse& res);
+    void HandleRecordStatus(const HttpRequest& req, HttpResponse& res);
+    void HandleRecordStart(const HttpRequest& req, HttpResponse& res);
+    void HandleRecordStop(const HttpRequest& req, HttpResponse& res);
+    void HandleProducerStatus(const HttpRequest& req, HttpResponse& res);
+    void HandleProducerSwitch(const HttpRequest& req, HttpResponse& res);
+    void HandleAiStatus(const HttpRequest& req, HttpResponse& res);
+    void HandleAiSwitch(const HttpRequest& req, HttpResponse& res);
+    void HandlePipelineStatus(const HttpRequest& req, HttpResponse& res);
+    void HandlePipelineResolution(const HttpRequest& req, HttpResponse& res);
+    void HandleModelList(const HttpRequest& req, HttpResponse& res);
+    void HandleModelUpload(const HttpRequest& req, HttpResponse& res);
+    void HandleModelDelete(const HttpRequest& req, HttpResponse& res);
+    void HandleRegisteredModels(const HttpRequest& req, HttpResponse& res);
 
     HttpApiConfig config_;
     StreamConfig stream_config_;
