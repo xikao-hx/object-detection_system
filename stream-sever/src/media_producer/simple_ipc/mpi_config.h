@@ -18,6 +18,7 @@
 #include "rk_mpi_vi.h"
 #include "rk_mpi_vpss.h"
 #include "sample_comm.h"
+#include "../rk_venc_config.h"
 
 namespace media::simple_ipc {
 
@@ -156,58 +157,6 @@ namespace media::simple_ipc {
         RK_MPI_VPSS_StopGrp(grpId);
         RK_MPI_VPSS_DisableChn(grpId, kVpssChn);
         RK_MPI_VPSS_DestroyGrp(grpId);
-        return 0;
-    }
-
-    // ============================================================================
-    // VENC 初始化函数
-    // ============================================================================
-
-    /**
-     * @brief 初始化 VENC（NV12/YUV420SP 输入）
-     *
-     * SimpleIPC 管线中，VPSS 输出 NV12 格式，硬件直接绑定 VENC，零拷贝。
-     */
-    inline int venc_init(int chnId, int width, int height, RK_CODEC_ID_E enType,
-                         int bitrate_kbps, int framerate, int gop) {
-        VENC_CHN_ATTR_S stAttr;
-        memset(&stAttr, 0, sizeof(stAttr));
-
-        if (bitrate_kbps <= 0) {
-            bitrate_kbps = 10 * 1024;
-        }
-        if (framerate <= 0) {
-            framerate = 30;
-        }
-        if (gop <= 0) {
-            gop = framerate;
-        }
-
-        stAttr.stVencAttr.enType = enType;
-        stAttr.stVencAttr.enPixelFormat = RK_FMT_YUV420SP;
-        stAttr.stVencAttr.u32Profile = H264E_PROFILE_HIGH;
-        stAttr.stVencAttr.u32PicWidth = width;
-        stAttr.stVencAttr.u32PicHeight = height;
-        stAttr.stVencAttr.u32VirWidth = width;
-        stAttr.stVencAttr.u32VirHeight = height;
-        stAttr.stVencAttr.u32StreamBufCnt = 2;
-        stAttr.stVencAttr.u32BufSize = width * height / 2;
-
-        stAttr.stRcAttr.enRcMode = VENC_RC_MODE_H264CBR;
-        stAttr.stRcAttr.stH264Cbr.u32Gop = gop;
-        stAttr.stRcAttr.stH264Cbr.u32BitRate = bitrate_kbps;
-        stAttr.stRcAttr.stH264Cbr.fr32DstFrameRateDen = 1;
-        stAttr.stRcAttr.stH264Cbr.fr32DstFrameRateNum = framerate;
-        stAttr.stRcAttr.stH264Cbr.u32SrcFrameRateDen = 1;
-        stAttr.stRcAttr.stH264Cbr.u32SrcFrameRateNum = framerate;
-
-        RK_MPI_VENC_CreateChn(chnId, &stAttr);
-
-        VENC_RECV_PIC_PARAM_S stRecvParam;
-        memset(&stRecvParam, 0, sizeof(stRecvParam));
-        stRecvParam.s32RecvPicNum = -1;
-        RK_MPI_VENC_StartRecvFrame(chnId, &stRecvParam);
-
         return 0;
     }
 

@@ -12,8 +12,11 @@
 #include "common/logger.h"
 #include "simple_ipc/simple_ipc_config.h"
 #include "simple_ipc/simple_ipc_producer.h"
+#include "uvc/uvc_h264_config.h"
+#include "uvc/uvc_h264_producer.h"
 
 #include <chrono>
+#include <cstdlib>
 
 namespace media {
 
@@ -347,6 +350,16 @@ namespace media {
                 sipc_config.bitrate_kbps = config_.bitrate_kbps;
                 sipc_config.resolution = sipc_resolution_;
                 return CreateSimpleIPCProducer(sipc_config);
+            }
+            case ProducerMode::UvcH264: {
+                UvcH264Config uvc_config;
+                if (const char *device = std::getenv("AIPC_UVC_DEVICE")) {
+                    uvc_config.capture.device = device;
+                }
+                uvc_config.capture.fps = config_.framerate;
+                uvc_config.bitrate_kbps = config_.bitrate_kbps;
+                uvc_config.gop = config_.framerate;
+                return CreateUvcH264Producer(uvc_config);
             }
             
             default:

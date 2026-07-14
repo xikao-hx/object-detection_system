@@ -10,7 +10,7 @@
  * HTTP API: 见 http.h
  *
  * 使用新的 Producer-based 架构：
- * - MediaManager: 统一管理视频采集模式（SimpleIPC）
+ * - MediaManager: 统一管理 SimpleIPC 和 USB UVC-H264 采集模式
  * - StreamManager: 管理流分发（RTSP/WebRTC/WebSocket/File）
  *
  * @author 好软，好温暖
@@ -210,15 +210,17 @@ int main(int argc, char *argv[]) {
             std::string mode_str = argv[++i];
             if (mode_str == "simple_ipc" || mode_str == "ipc") {
                 g_startup_mode = media::ProducerMode::SimpleIPC;
+            } else if (mode_str == "uvc" || mode_str == "uvc_h264") {
+                g_startup_mode = media::ProducerMode::UvcH264;
             } else {
-                printf("Unknown mode: %s (valid: simple_ipc)\n", mode_str.c_str());
+                printf("Unknown mode: %s (valid: simple_ipc, uvc)\n", mode_str.c_str());
                 return -1;
             }
             LOG_INFO("Startup mode set to: {}", media::ProducerModeToString(g_startup_mode));
         } else if (arg == "--help" || arg == "-h") {
             printf("Usage: %s [options]\n", argv[0]);
             printf("Options:\n");
-            printf("  --mode <mode>     Startup mode: simple_ipc (default: simple_ipc)\n");
+            printf("  --mode <mode>     Startup mode: simple_ipc or uvc (default: simple_ipc)\n");
             printf("  --record, -r      Enable file recording\n");
             printf("  --rtsp            Auto-start RTSP server on startup\n");
             printf("  --webrtc          Auto-start WebRTC server on startup\n");
@@ -231,6 +233,18 @@ int main(int argc, char *argv[]) {
             printf("  SIGNALING_HOST  WebRTC signaling server host (default: 127.0.0.1)\n");
             return 0;
         }
+    }
+
+    if (g_startup_mode == media::ProducerMode::UvcH264) {
+        constexpr int uvc_width = 1280;
+        constexpr int uvc_height = 480;
+        constexpr int uvc_fps = 30;
+        stream_config.webrtc_config.webrtc_config.video.width = uvc_width;
+        stream_config.webrtc_config.webrtc_config.video.height = uvc_height;
+        stream_config.webrtc_config.webrtc_config.video.fps = uvc_fps;
+        stream_config.mp4_config.width = uvc_width;
+        stream_config.mp4_config.height = uvc_height;
+        stream_config.mp4_config.fps = uvc_fps;
     }
 
     // ========================================================================

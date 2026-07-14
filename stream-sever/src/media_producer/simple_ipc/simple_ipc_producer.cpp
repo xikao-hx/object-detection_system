@@ -12,6 +12,7 @@
 #include "common/asio_context.h"
 #include "common/logger.h"
 #include "common/media_buffer.h"
+#include "../encoded_stream_dispatcher.h"
 #include "mpi_config.h"
 
 #include "rk_mpi_sys.h"
@@ -26,108 +27,6 @@
 namespace media {
 
     using namespace simple_ipc;
-
-    // ============================================================================
-    // 流分发器（嵌入实现）
-    // ============================================================================
-
-    /**
-     * @brief 简化的流分发器
-     *
-     * 直接在 Fetch 线程中分发，不使用额外队列
-     */
-    class SimpleStreamDispatcher {
-    public:
-        struct ConsumerInfo {
-            std::string name;
-            StreamCallback callback;
-            StreamConsumerType type;
-        };
-
-        void RegisterConsumer(const std::string &name, StreamCallback callback, StreamConsumerType type) {
-            if (running_.load()) {
-                LOG_WARN("Cannot register stream consumer '{}' while dispatcher is running", name);
-                return;
-            }
-            consumers_.push_back({name, std::move(callback), type});
-            LOG_INFO("Registered stream consumer: {} (type={})", name,
-                     type == StreamConsumerType::AsyncIO ? "AsyncIO" : "Direct");
-        }
-
-        void ClearConsumers() {
-            if (running_.load()) {
-                LOG_WARN("Cannot clear stream consumers while dispatcher is running");
-                return;
-            }
-            consumers_.clear();
-        }
-
-        void Start(int venc_chn) {
-            if (running_)
-                return;
-            venc_chn_ = venc_chn;
-            running_ = true;
-            fetch_thread_ = std::thread(&SimpleStreamDispatcher::FetchLoop, this);
-            LOG_INFO("Stream dispatcher started for VENC channel {}", venc_chn);
-        }
-
-        void Stop() {
-            if (!running_)
-                return;
-            running_ = false;
-            if (fetch_thread_.joinable()) {
-                fetch_thread_.join();
-            }
-            LOG_INFO("Stream dispatcher stopped");
-        }
-
-        bool IsRunning() const { return running_; }
-
-    private:
-        void FetchLoop() {
-            uint64_t frame_count = 0;
-            uint64_t consecutive_errors = 0;
-
-            while (running_) {
-                RK_S32 last_error = 0;
-                auto stream = acquire_encoded_stream(venc_chn_, 1000, &last_error);
-
-                if (!stream) {
-                    consecutive_errors++;
-                    if (consecutive_errors > 3 && consecutive_errors % 10 == 0) {
-                        LOG_WARN("VENC consecutive errors: {}, last: {:#x}", consecutive_errors, last_error);
-                    }
-                    continue;
-                }
-
-                frame_count++;
-                consecutive_errors = 0;
-
-                if (frame_count <= 5 || frame_count % 300 == 0) {
-                    LOG_DEBUG("Frame #{}, size={} bytes", frame_count, stream->pstPack ? stream->pstPack->u32Len : 0);
-                }
-
-                // 分发给所有消费者
-                for (auto &c: consumers_) {
-                    if (!c.callback)
-                        continue;
-
-                    if (c.type == StreamConsumerType::AsyncIO) {
-                        PostToIo([callback = c.callback, stream]() { callback(stream); });
-                    } else {
-                        c.callback(stream);
-                    }
-                }
-            }
-
-            LOG_DEBUG("Fetch loop exited, total frames: {}", frame_count);
-        }
-
-        std::vector<ConsumerInfo> consumers_;
-        std::atomic<bool> running_{false};
-        std::thread fetch_thread_;
-        int venc_chn_ = 0;
-    };
 
     // ============================================================================
     // SimpleIPCProducer 内部实现
@@ -148,7 +47,7 @@ namespace media {
         MPP_CHN_S venc_chn;
 
         // 流分发器
-        SimpleStreamDispatcher dispatcher;
+        EncodedStreamDispatcher dispatcher;
     };
 
     // ============================================================================
@@ -216,7 +115,9 @@ namespace media {
             return true;
         }
 
-        impl_->dispatcher.Start(kVencChn);
+        if (!impl_->dispatcher.Start(kVencChn)) {
+            return false;
+        }
         running_.store(true);
         LOG_INFO("SimpleIPC producer started");
         return true;
@@ -303,8 +204,8 @@ namespace media {
         LOG_DEBUG("VPSS initialized");
 
         // 5. VENC 初始化
-        ret = venc_init(kVencChn, res.width, res.height, RK_VIDEO_ID_AVC,
-                        config_.bitrate_kbps, config_.framerate, config_.framerate);
+        ret = InitH264Venc(kVencChn, res.width, res.height,
+                           config_.bitrate_kbps, config_.framerate, config_.framerate);
         if (ret != 0) {
             LOG_ERROR("VENC init failed");
             return -1;

@@ -11,7 +11,9 @@ SYSROOT="${AIPC_SYSROOT:-/home/xikao/Luckfox/luckfox-pico/sysdrv/source/buildroo
 REMOTE_HOST="${AIPC_REMOTE_HOST:-root@192.168.5.9}"
 REMOTE_DIR="${AIPC_REMOTE_DIR:-/root/aipc}"
 SKIP_FRONTEND_BUILD="${AIPC_SKIP_FRONTEND_BUILD:-0}"
-KEEP_LIBDATACHANNEL="${AIPC_KEEP_LIBDATACHANNEL:-0}"
+# aipc 在进程装载阶段就依赖 libdatachannel，即使本次只验收 RTSP 也不能缺少。
+# 只有确认板端系统库目录已经提供兼容版本时，才显式设置为 0 跳过部署。
+KEEP_LIBDATACHANNEL="${AIPC_KEEP_LIBDATACHANNEL:-1}"
 
 # 步骤 0: 构建前端
 if [ "$SKIP_FRONTEND_BUILD" != "1" ]; then
@@ -24,7 +26,7 @@ echo "执行 cmake --install ${BUILD_DIR}..."
 echo "========================================="
 cmake --install "${BUILD_DIR}"
 
-# 第一步半：删除 libdatachannel 相关文件（已手动部署到设备）
+# 第一步半：可选地删除 libdatachannel（仅用于板端系统已预装兼容库的场景）
 if [ "$KEEP_LIBDATACHANNEL" != "1" ]; then
     echo ""
     echo "清理 libdatachannel 的动态库和头文件（保留其他依赖库）..."
@@ -32,6 +34,9 @@ if [ "$KEEP_LIBDATACHANNEL" != "1" ]; then
     rm -f "${INSTALL_DIR}/lib/libdatachannel.a"
     rm -rf "${INSTALL_DIR}/include"
     echo "清理完成"
+elif [ ! -e "${INSTALL_DIR}/lib/libdatachannel.so.0.24" ]; then
+    echo "错误: 安装目录缺少 libdatachannel.so.0.24，aipc 将无法启动" >&2
+    exit 1
 fi
 
 # 第二步：补充板端运行所需的系统动态库

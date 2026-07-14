@@ -14,6 +14,8 @@ set(MEDIA_PRODUCER_CORE_SOURCES
 
 set(MEDIA_PRODUCER_CORE_HEADERS
     i_media_producer.h
+    encoded_stream_dispatcher.h
+    rk_venc_config.h
     media_manager.h
 )
 
@@ -43,6 +45,7 @@ set(MEDIA_PRODUCER_MPI_LIBS
 # 添加子模块
 # ========================================
 add_subdirectory(simple_ipc)         # SimpleIPC 纯监控模式
+add_subdirectory(uvc)                # USB UVC MJPEG 采集
 
 # ========================================
 # 创建静态库
@@ -72,6 +75,7 @@ target_link_libraries(media_producer
     PUBLIC
         common
         simple_ipc_lib   # SimpleIPC 纯监控模式
+        uvc_h264_lib     # USB UVC -> H.264 模式
     ${MEDIA_PRODUCER_MPI_LIBS}
 )
 

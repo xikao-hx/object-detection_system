@@ -189,6 +189,7 @@ namespace media {
 
     // 前向声明
     struct SimpleIPCConfig;
+    struct UvcH264Config;
 
     /**
      * @brief 创建纯 IPC 模式生产者
@@ -203,6 +204,9 @@ namespace media {
      */
     std::unique_ptr<IMediaProducer> CreateSimpleIPCProducer(const SimpleIPCConfig &config);
 
+    /** 创建 USB UVC MJPEG 解码并硬件编码为 H.264 的生产者。 */
+    std::unique_ptr<IMediaProducer> CreateUvcH264Producer(const UvcH264Config &config);
+
     // ============================================================================
     // 生产者模式枚举
     // ============================================================================
@@ -212,6 +216,7 @@ namespace media {
      */
     enum class ProducerMode {
         SimpleIPC, ///< 纯监控模式（高清、低延迟、零 CPU 拷贝）
+        UvcH264, ///< USB UVC MJPEG -> NV12 -> H.264
     };
 
     /**
@@ -221,6 +226,8 @@ namespace media {
         switch (mode) {
             case ProducerMode::SimpleIPC:
                 return "SimpleIPC";
+            case ProducerMode::UvcH264:
+                return "UVC-H264";
             default:
                 return "Unknown";
         }

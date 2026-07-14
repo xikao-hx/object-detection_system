@@ -7,9 +7,11 @@
 #   ./start_app.sh [options]
 #
 # 选项:
+#   --mode <mode>    采集模式：simple_ipc 或 uvc
 #   --record, -r    启用录制功能
-#   --no-rtsp       禁用 RTSP 流
-#   --no-webrtc     禁用 WebRTC 流
+#   --no-rtsp       不自动启动 RTSP（默认自动启动）
+#   --no-webrtc     不自动启动 WebRTC（默认自动启动）
+#   --no-ws-preview 禁用 WebSocket H.264 预览（默认启动）
 #   --daemon, -d    后台运行
 #   --help, -h      显示帮助
 #
@@ -25,6 +27,8 @@ LOG_FILE="/var/log/${APP_NAME}.log"
 # 默认选项
 DAEMON_MODE=0
 EXTRA_ARGS=""
+AUTO_START_RTSP=1
+AUTO_START_WEBRTC=1
 
 # 解析命令行参数
 while [ $# -gt 0 ]; do
@@ -33,8 +37,24 @@ while [ $# -gt 0 ]; do
             DAEMON_MODE=1
             shift
             ;;
-        --record|-r|--no-rtsp|--no-webrtc)
+        --mode)
+            if [ $# -lt 2 ]; then
+                echo "错误: --mode 需要参数 simple_ipc 或 uvc"
+                exit 1
+            fi
+            EXTRA_ARGS="$EXTRA_ARGS --mode $2"
+            shift 2
+            ;;
+        --record|-r|--no-ws-preview)
             EXTRA_ARGS="$EXTRA_ARGS $1"
+            shift
+            ;;
+        --no-rtsp)
+            AUTO_START_RTSP=0
+            shift
+            ;;
+        --no-webrtc)
+            AUTO_START_WEBRTC=0
             shift
             ;;
         --help|-h)
@@ -43,14 +63,17 @@ while [ $# -gt 0 ]; do
             echo "使用方法: $0 [options]"
             echo ""
             echo "选项:"
+            echo "  --mode <mode>   采集模式：simple_ipc 或 uvc（默认: simple_ipc）"
             echo "  --record, -r    启用录制功能"
-            echo "  --no-rtsp       禁用 RTSP 流"
-            echo "  --no-webrtc     禁用 WebRTC 流"
+            echo "  --no-rtsp       不自动启动 RTSP（默认自动启动）"
+            echo "  --no-webrtc     不自动启动 WebRTC（默认自动启动）"
+            echo "  --no-ws-preview 禁用 WebSocket H.264 预览（默认启动）"
             echo "  --daemon, -d    后台运行"
             echo "  --help, -h      显示帮助"
             echo ""
             echo "环境变量:"
             echo "  SIGNALING_HOST  WebRTC 信令服务器地址 (默认: 127.0.0.1)"
+            echo "  AIPC_UVC_DEVICE UVC 视频设备（默认自动发现，例如 /dev/video0）"
             echo "  AIPC_OEM_LIB_DIR  板端 OEM 库目录 (默认: /oem/usr/lib)"
             echo "  AIPC_RKIPC_STOP_CMD  停止默认 rkipc 的命令；设为空可跳过"
             exit 0
@@ -61,6 +84,15 @@ while [ $# -gt 0 ]; do
             ;;
     esac
 done
+
+# aipc 当前使用 --rtsp/--webrtc 表示自动启动。脚本保留原来的
+# “默认启动、通过 --no-* 关闭”使用习惯，并在这里转换参数。
+if [ "$AUTO_START_RTSP" -eq 1 ]; then
+    EXTRA_ARGS="$EXTRA_ARGS --rtsp"
+fi
+if [ "$AUTO_START_WEBRTC" -eq 1 ]; then
+    EXTRA_ARGS="$EXTRA_ARGS --webrtc"
+fi
 
 # 检查是否已经在运行
 if [ -f "$PID_FILE" ]; then

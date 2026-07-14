@@ -544,7 +544,7 @@ void HttpApi::HandleProducerStatus(const HttpRequest& /*req*/, HttpResponse& res
     json data;
     data["mode"] = media::ProducerModeToString(mgr.GetCurrentMode());
     data["running"] = mgr.IsRunning();
-    data["available_modes"] = json::array({"simple_ipc"});
+    data["available_modes"] = json::array({"simple_ipc", "uvc"});
 
     res.set_content(json_response(true, "ok", data), "application/json");
 }
@@ -556,14 +556,32 @@ void HttpApi::HandleProducerSwitch(const HttpRequest& req, HttpResponse& res) {
 
         LOG_INFO("Producer mode switch requested: {}", mode_str);
 
-        if (mode_str == "simple_ipc") {
+        media::ProducerMode target_mode;
+        if (mode_str == "simple_ipc" || mode_str == "ipc") {
+            target_mode = media::ProducerMode::SimpleIPC;
+        } else if (mode_str == "uvc" || mode_str == "uvc_h264") {
+            target_mode = media::ProducerMode::UvcH264;
+        } else {
+            res.set_content(json_response(false, "Unsupported producer mode"), "application/json");
+            return;
+        }
+
+        auto &manager = media::MediaManager::Instance();
+        if (manager.GetCurrentMode() == target_mode) {
             json data;
-            data["mode"] = media::ProducerModeToString(media::ProducerMode::SimpleIPC);
+            data["mode"] = media::ProducerModeToString(target_mode);
             res.set_content(json_response(true, "Already in requested mode", data), "application/json");
             return;
         }
 
-        res.set_content(json_response(false, "Unsupported producer mode"), "application/json");
+        if (manager.SwitchMode(target_mode) != 0) {
+            res.set_content(json_response(false, "Failed to switch producer mode"), "application/json");
+            return;
+        }
+
+        json data;
+        data["mode"] = media::ProducerModeToString(target_mode);
+        res.set_content(json_response(true, "Producer mode switched", data), "application/json");
     } catch (const json::exception &e) {
         res.set_content(json_response(false, std::string("Invalid JSON: ") + e.what()), "application/json");
     }
@@ -605,6 +623,22 @@ void HttpApi::HandleAiSwitch(const HttpRequest& req, HttpResponse& res) {
 void HttpApi::HandlePipelineStatus(const HttpRequest& /*req*/, HttpResponse& res) {
     auto &mgr = media::MediaManager::Instance();
     auto cfg = mgr.GetConfig();
+    if (mgr.GetCurrentMode() == media::ProducerMode::UvcH264) {
+        json data;
+        data["mode"] = "uvc";
+        json resolution;
+        resolution["preset"] = "uvc_stereo";
+        resolution["width"] = 1280;
+        resolution["height"] = 480;
+        resolution["framerate"] = cfg.framerate;
+        data["resolution"] = resolution;
+        data["initialized"] = mgr.IsInitialized();
+        data["streaming"] = mgr.IsRunning();
+        data["available_resolutions"] = json::array({"1280x480"});
+        data["note"] = "USB UVC stereo side-by-side input";
+        res.set_content(json_response(true, "ok", data), "application/json");
+        return;
+    }
     auto sipc_res = mgr.GetSIPCResolution();
     auto res_cfg = media::simple_ipc::ResolutionConfig::FromPreset(sipc_res);
     res_cfg.framerate = cfg.framerate;

@@ -172,7 +172,7 @@ set_target_properties(aipc PROPERTIES
     INSTALL_RPATH "$ORIGIN/../lib"
     BUILD_WITH_INSTALL_RPATH OFF
 )
-install(TARGETS aipc
+install(TARGETS aipc uvc_capture_test
     RUNTIME DESTINATION ${AIPC_INSTALL_BIN_DIR}
 )
 
