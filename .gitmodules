@@ -1,0 +1,15 @@
+[submodule "stream-server/3rdparty/asio"]
+	path = stream-server/3rdparty/asio
+	url = https://github.com/chriskohlhoff/asio.git
+[submodule "stream-server/3rdparty/cpp-httplib"]
+	path = stream-server/3rdparty/cpp-httplib
+	url = https://github.com/yhirose/cpp-httplib.git
+[submodule "stream-server/3rdparty/libdatachannel"]
+	path = stream-server/3rdparty/libdatachannel
+	url = https://github.com/paullouisageneau/libdatachannel.git
+[submodule "stream-server/3rdparty/luckfox_pico_rkmpi_example"]
+	path = stream-server/3rdparty/luckfox_pico_rkmpi_example
+	url = https://github.com/LuckfoxTECH/luckfox_pico_rkmpi_example.git
+[submodule "stream-server/3rdparty/spdlog"]
+	path = stream-server/3rdparty/spdlog
+	url = https://github.com/gabime/spdlog.git
