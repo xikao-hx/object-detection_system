@@ -342,3 +342,45 @@ cmake --install stream-server/build/Debug
 - 否决统一 full 或双库 `DT_NEEDED` 方案；最终 `aipc` ELF 仅依赖 compact `librockit.so`，UVC 初始化时通过 `dlopen`/`dlsym` 加载隔离的 full VDEC runtime，SimpleIPC 路径不会装载 full。
 - 共享 probe 最终 300 帧：capture `30.07fps`、pipeline `30.07fps`、sequence gap 0、VDEC/RGA 错误 0，VDEC get avg `19.810ms`、RGA avg `1.227ms`、pipeline avg `21.368ms`，NV12 为准确的 921600 bytes。
 - 正式 UVC 长稳运行到 4144 个 H.264 output：capture 约 `30.06fps`、H.264 output `29.87fps`，sequence gap 0、decode/send error 0、mailbox depth 最大 1；RTSP 为 H.264 `1280x480@30fps`，三个 HTTP 状态接口返回 200，SIGTERM 全资源清理和两次重复启动通过。Step 8 验收完成。
+
+## Step 9：Web 控制台摄像头与分辨率适配
+
+### 目标和成功标准
+
+- 移除 Web 控制台中的 VisionG、推理开关、推理统计、Python 编辑器和模型管理内容，不删除或修改后端兼容 API。
+- 将原模式按钮改为板载 `SimpleIPC` 与双目 USB `UVC` 摄像头选择，复用 `/api/producer/status` 和 `/api/producer/switch`。
+- 分辨率列表跟随当前 producer：SimpleIPC 使用后端返回的 1080p/720p/480p，UVC 展示双目拼接 `1280x480@30fps` 固定规格；禁止向 UVC 发送 SimpleIPC 专属分辨率切换请求。
+- 保持视频预览、服务管理、录制、连接信息和后端 HTTP 响应兼容。
+
+### 修改文件和验证
+
+- `stream-server/www/src/App.svelte`：页面状态、摄像头切换、动态分辨率选项和推理 UI 删除。
+- `memory-bank/*.md`：记录 UI 职责、边界和验证结果。
+
+```bash
+cd stream-server/www
+npm run build
+```
+
+板端验收需分别切换两种摄像头，确认选中态、分辨率列表、预览重连与失败提示；用户确认前不提交本步骤。
+
+## Step 10：UVC 三档双目分辨率冷切换
+
+### 目标和成功标准
+
+- 将相机枚举支持的三档双目水平拼接 MJPEG 规格接入正式链路：`3840x1080`、`2560x720`、`1280x480`。本步不提供帧率选择；采集配置沿用 30fps 请求值，但交付以板端实际吞吐为准，不承诺三档均达到 30fps。
+- `/api/pipeline/status` 在 UVC 模式返回当前真实预设及三档 `available_resolutions`；既有字段、成功响应 message 和 SimpleIPC 行为保持兼容。
+- `/api/pipeline/resolution` 根据当前 producer 分派到 SimpleIPC 或 UVC 冷切换；UVC 切换完整重建 capture、VDEC、RGA、VENC 和 dispatcher 注册，初始化失败时恢复旧预设。
+- Web 只渲染后端返回的当前模式能力并调用同一分辨率 endpoint，不在前端虚构可用规格。
+
+### 修改文件和边界
+
+- `media_producer/uvc/uvc_config.h`：定义三档 UVC preset 与尺寸映射，不依赖 HTTP。
+- `media_producer/media_manager.*`：保存 UVC preset 并拥有 producer 冷切换/失败恢复。
+- `http.cpp`：解析模式对应的 preset，扩展既有 pipeline status/resolution 行为。
+- `www/src/App.svelte`：展示三档 UVC 规格并允许调用真实切换。
+- `memory-bank/*.md`：记录职责、风险和验证结果。
+
+不修改 distribution 所有权、H.264 consumer 类型、mailbox 策略、VDEC/RGA/VENC 内部算法或帧率配置。高分辨率必须逐档板端验证硬件能力、内存、实际 capture/output fps、RTSP/WS 预览和恢复路径；用户确认前不提交。
+
+验收结果：三档板端冷切换、RTSP 实际尺寸、连续输出、切回 `1280x480` 和 Web 双目画面均通过，用户已确认 Step 9/10 页面验收完成。

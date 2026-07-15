@@ -31,6 +31,7 @@
 
 #include "i_media_producer.h"
 #include "simple_ipc/simple_ipc_config.h"
+#include "uvc/uvc_config.h"
 
 #include <functional>
 #include <memory>
@@ -169,6 +170,17 @@ namespace media {
         int SetResolution(simple_ipc::Resolution preset);
 
         /**
+         * @brief 切换 UVC 双目分辨率预设（冷切换）
+         *
+         * 完整重建 UVC producer，使 V4L2、VDEC、RGA 和 VENC 使用新尺寸。
+         * 初始化失败时恢复旧预设和旧 producer。
+         *
+         * @param preset 目标 UVC 分辨率预设
+         * @return 0 成功，-1 失败（非 UVC 模式或重建失败）
+         */
+        int SetResolution(uvc::Resolution preset);
+
+        /**
          * @brief 设置帧率
          *
          * 更新共有配置中的 framerate 字段。
@@ -191,6 +203,11 @@ namespace media {
          * 切换回 SimpleIPC 模式时将使用此值初始化。
          */
         simple_ipc::Resolution GetSIPCResolution() const { return sipc_resolution_; }
+
+        /**
+         * @brief 获取当前保存的 UVC 双目分辨率预设
+         */
+        uvc::Resolution GetUvcResolution() const { return uvc_resolution_; }
 
         // ========== 流消费者管理 ==========
 
@@ -262,6 +279,9 @@ namespace media {
 
         // SimpleIPC 专有：分辨率预设
         simple_ipc::Resolution sipc_resolution_ = simple_ipc::Resolution::R_1080P;
+
+        // UVC 专有：双目水平拼接分辨率预设
+        uvc::Resolution uvc_resolution_ = uvc::Resolution::R_1280X480;
 
         // 当前生产者实例
         std::unique_ptr<IMediaProducer> producer_;

@@ -62,7 +62,8 @@ namespace media {
             buffer_layout = nv12_converter.Layout();
 
             result = InitH264Venc(config.venc_channel, config.capture.width, config.capture.height,
-                                  config.bitrate_kbps, config.capture.fps, config.gop);
+                                  config.bitrate_kbps, config.capture.fps, config.gop,
+                                  buffer_layout.u32VirWidth, buffer_layout.u32VirHeight);
             if (result != RK_SUCCESS) {
                 LOG_ERROR("Failed to initialize H.264 VENC channel {}: {:#x}", config.venc_channel, result);
                 return -1;

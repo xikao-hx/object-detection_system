@@ -111,8 +111,7 @@ void WebRTCService::SendVideoFrame(const EncodedStreamPtr& stream) {
     }
 
     // 获取视频数据
-    const uint8_t* data = static_cast<const uint8_t*>(
-        RK_MPI_MB_Handle2VirAddr(stream->pstPack->pMbBlk));
+    const uint8_t* data = static_cast<const uint8_t*>(get_stream_vir_addr(stream));
     uint32_t len = stream->pstPack->u32Len;
     uint64_t pts = stream->pstPack->u64PTS;
 

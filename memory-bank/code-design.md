@@ -397,3 +397,61 @@ UvcFramePtr -> external MB(retain input) -> VDEC frame(move-only)
 
 - 自动：无告警交叉构建、install、`aipc` ELF 只出现 `librockit.so` 而不出现 `librockit_full.so` 的 `DT_NEEDED`、`git diff --check`。
 - 板端：正式 UVC 超过 500 帧约 30fps、零硬件错误、RTSP/WS/WebRTC/HTTP、停止与重复启停均通过；共享 probe 追加 300 帧通过。当前板无 MIPI sensor，SimpleIPC 验证到既有 producer 初始化边界，并以 full runtime 未加载作为链接隔离门禁。
+
+# Step 9 代码设计：Web 摄像头与分辨率适配
+
+## 成功标准与职责
+
+- `App.svelte` 只展示摄像头、分辨率、预览和媒体服务控制，不再承载推理工程或模型管理 UI。
+- 摄像头状态以 `/api/producer/status` 为准，并将后端 `SimpleIPC`/`UVC-H264` 映射为前端稳定值 `simple_ipc`/`uvc`。
+- 分辨率选项以 `/api/pipeline/status` 为准；只在 SimpleIPC 且 pipeline 已初始化时允许调用 `/api/pipeline/resolution`。
+
+## 数据流与边界
+
+```text
+producer/status -> camera selected state
+producer/switch -> refresh producer + pipeline -> reconnect active preview
+pipeline/status -> current resolution + mode-specific options
+pipeline/resolution -> SimpleIPC only
+```
+
+- 不修改后端 AI/producer/pipeline endpoint、status code、message 或 JSON 字段。
+- 不在前端虚构 UVC 可切换分辨率或帧率；当前相机实测能力只展示 `1280x480@30fps`。
+- 删除不可达的 VisionG/Python/model 模板和请求逻辑，而不是仅用 CSS 隐藏。
+
+## 验收
+
+- 自动：`npm run build`、构建产物关键字检查、`git diff --check`。
+- 人工：两种摄像头按钮选中态；SimpleIPC 多分辨率切换；UVC 双目规格及不可误切换；切换后预览重连和错误提示。
+
+# Step 10 代码设计：UVC 三档分辨率冷切换
+
+## 成功标准与文件职责
+
+- `uvc_config.h` 维护 UVC preset 到宽高的唯一映射：`3840x1080`、`2560x720`、`1280x480`；底层仍接收明确的 `UvcConfig`。
+- `MediaManager` 分别保存 SimpleIPC 与 UVC preset；UVC 切换只在 UVC 模式执行，并完整重建不可运行期变更配置的 producer。
+- `http.cpp` 只负责 JSON preset 解析和响应，不直接操作 V4L2/RKMPI。
+- `App.svelte` 以 `/api/pipeline/status.available_resolutions` 为事实来源，向既有 `/api/pipeline/resolution` 发送用户选择。
+
+## 数据流与失败恢复
+
+```text
+Web resolution button
+  -> POST /api/pipeline/resolution
+  -> MediaManager::SetUvcResolution
+  -> stop/deinit old producer
+  -> create/init/register/start new producer with selected UvcConfig
+  -> refresh pipeline status + reconnect preview
+```
+
+- 新 preset 初始化失败时恢复旧 preset，并重建、注册和按原状态启动旧 producer；HTTP 返回既有失败 envelope，不伪造成功选中态。
+- VDEC、RGA 和 VENC 已按 `config.capture.width/height` 与 CAL layout 初始化，本步不增加第二套尺寸分支或写死 buffer size。
+- UVC 创建 VENC 时必须把 RGA/CAL 的 virtual width/height 传入共享 VENC helper；例如 `3840x1080` 的 NV12 virtual height 为 `1088`，若通道仍配置 `1080`，内核会因 frame/prep layout 不一致逐帧丢弃。
+- `EncodedStreamDispatcher` 获取 VENC 输出后，必须在 fetch thread 内复制 `pMbBlk` 指向的当前有效 pack 并立即调用 `RK_MPI_VENC_ReleaseStream`；副本以 external MB 包装、`u32Offset` 归零，继续使用既有 `EncodedStreamPtr` 分发。禁止让 shared_ptr deleter 在 Asio consumer thread 释放原生 VENC stream。
+
+## 风险与门禁
+
+- `3840x1080` 会显著增加 VDEC/RGA/VENC 内存和 USB MJPEG 负载；必须以板端初始化、连续输出和错误日志为准，不因相机枚举支持就宣称完整链路支持。
+- distribution 的录制/WebRTC 静态配置是既有跨分辨率限制；本步先验收 RTSP、WebSocket Preview 和未录制状态下的摄像头冷切换，不扩张为 distribution 重构。
+- 自动门禁：交叉构建、install、Web build、`git diff --check`。
+- 板端门禁：三档逐一至少 300 帧，检查 capture/output 实际 fps、VDEC/RGA/VENC 错误、HTTP 状态、预览画面和切回 `1280x480`；不以配置值 30fps 代替实测结果。

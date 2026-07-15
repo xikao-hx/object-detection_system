@@ -19,6 +19,7 @@
 #include "media_distribution/webrtc/webrtc_service.h"
 #include "media_producer/media_manager.h"
 #include "media_producer/simple_ipc/simple_ipc_config.h"
+#include "media_producer/uvc/uvc_config.h"
 
 #include <algorithm>
 #include <filesystem>
@@ -624,17 +625,25 @@ void HttpApi::HandlePipelineStatus(const HttpRequest& /*req*/, HttpResponse& res
     auto &mgr = media::MediaManager::Instance();
     auto cfg = mgr.GetConfig();
     if (mgr.GetCurrentMode() == media::ProducerMode::UvcH264) {
+        const auto preset = mgr.GetUvcResolution();
+        const auto uvc_resolution = media::uvc::ResolutionConfig::FromPreset(preset);
+        const char *preset_name = "1280x480";
+        if (preset == media::uvc::Resolution::R_3840X1080) {
+            preset_name = "3840x1080";
+        } else if (preset == media::uvc::Resolution::R_2560X720) {
+            preset_name = "2560x720";
+        }
         json data;
         data["mode"] = "uvc";
         json resolution;
-        resolution["preset"] = "uvc_stereo";
-        resolution["width"] = 1280;
-        resolution["height"] = 480;
+        resolution["preset"] = preset_name;
+        resolution["width"] = uvc_resolution.width;
+        resolution["height"] = uvc_resolution.height;
         resolution["framerate"] = cfg.framerate;
         data["resolution"] = resolution;
         data["initialized"] = mgr.IsInitialized();
         data["streaming"] = mgr.IsRunning();
-        data["available_resolutions"] = json::array({"1280x480"});
+        data["available_resolutions"] = json::array({"3840x1080", "2560x720", "1280x480"});
         data["note"] = "USB UVC stereo side-by-side input";
         res.set_content(json_response(true, "ok", data), "application/json");
         return;
@@ -674,6 +683,37 @@ void HttpApi::HandlePipelineResolution(const HttpRequest& req, HttpResponse& res
 
         LOG_INFO("Resolution switch requested: {}", preset_str);
 
+        auto &mgr = media::MediaManager::Instance();
+        if (mgr.GetCurrentMode() == media::ProducerMode::UvcH264) {
+            media::uvc::Resolution target_res;
+            if (preset_str == "3840x1080") {
+                target_res = media::uvc::Resolution::R_3840X1080;
+            } else if (preset_str == "2560x720") {
+                target_res = media::uvc::Resolution::R_2560X720;
+            } else if (preset_str == "1280x480") {
+                target_res = media::uvc::Resolution::R_1280X480;
+            } else {
+                res.set_content(json_response(false, "Unsupported UVC resolution"), "application/json");
+                return;
+            }
+
+            const auto resolution = media::uvc::ResolutionConfig::FromPreset(target_res);
+            json data;
+            data["resolution"] = preset_str;
+            data["width"] = resolution.width;
+            data["height"] = resolution.height;
+            if (mgr.GetUvcResolution() == target_res) {
+                res.set_content(json_response(true, "Already using requested resolution", data), "application/json");
+                return;
+            }
+            if (mgr.SetResolution(target_res) != 0) {
+                res.set_content(json_response(false, "Failed to switch resolution"), "application/json");
+                return;
+            }
+            res.set_content(json_response(true, "Resolution switched", data), "application/json");
+            return;
+        }
+
         media::simple_ipc::Resolution target_res;
         if (preset_str == "720p") {
             target_res = media::simple_ipc::Resolution::R_720P;
@@ -681,13 +721,6 @@ void HttpApi::HandlePipelineResolution(const HttpRequest& req, HttpResponse& res
             target_res = media::simple_ipc::Resolution::R_480P;
         } else {
             target_res = media::simple_ipc::Resolution::R_1080P;
-        }
-
-        auto &mgr = media::MediaManager::Instance();
-        if (mgr.GetCurrentMode() != media::ProducerMode::SimpleIPC) {
-            res.set_content(json_response(false, "Resolution switching is only available in SimpleIPC mode"),
-                            "application/json");
-            return;
         }
 
         if (mgr.GetSIPCResolution() == target_res) {

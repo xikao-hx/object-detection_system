@@ -23,6 +23,7 @@
 #include <condition_variable>
 #include <cstring>
 #include <cstdio>
+#include <new>
 
 // RKMPI 头文件
 #include "rk_mpi_sys.h"
@@ -183,15 +184,21 @@ inline EncodedFramePtr acquire_encoded_frame(RK_S32 chn_id, RK_S32 timeout_ms = 
 }
 
 // ============================================================================
-// 零拷贝编码流接口 - 用于 VENC 输出的跨线程共享
+// 编码流接口 - 在取流线程复制后用于跨线程共享
 // ============================================================================
+
+inline RK_S32 release_encoded_stream_copy(void* opaque) {
+    delete[] static_cast<uint8_t*>(opaque);
+    return RK_SUCCESS;
+}
 
 /**
  * @brief 从 VENC 通道获取编码流并包装为智能指针
  * 
- * 使用 shared_ptr 的引用计数管理 VENC buffer 生命周期：
- * - 获取时调用 GetStream
- * - 最后一个使用者释放时自动调用 ReleaseStream
+ * VENC 要求 GetStream/ReleaseStream 在同一线程调用。因此本函数在取流线程：
+ * - 获取 VENC stream 并复制有效数据
+ * - 立即释放原生 VENC buffer
+ * - 用独立 MB 包装副本，供异步 consumer 安全共享
  * 
  * @param chn_id VENC 通道 ID
  * @param timeout_ms 超时时间（毫秒），-1 表示阻塞等待
@@ -199,23 +206,67 @@ inline EncodedFramePtr acquire_encoded_frame(RK_S32 chn_id, RK_S32 timeout_ms = 
  * @return EncodedStreamPtr 成功返回流指针，失败返回 nullptr
  */
 inline EncodedStreamPtr acquire_encoded_stream(RK_S32 chn_id, RK_S32 timeout_ms = -1, RK_S32* lastError = nullptr) {
-    auto stream = new VENC_STREAM_S();
-    memset(stream, 0, sizeof(VENC_STREAM_S));
-    stream->pstPack = new VENC_PACK_S();
-    memset(stream->pstPack, 0, sizeof(VENC_PACK_S));
-    
-    RK_S32 ret = RK_MPI_VENC_GetStream(chn_id, stream, timeout_ms);
+    VENC_STREAM_S native_stream{};
+    VENC_PACK_S native_pack{};
+    native_stream.pstPack = &native_pack;
+
+    RK_S32 ret = RK_MPI_VENC_GetStream(chn_id, &native_stream, timeout_ms);
     if (ret != RK_SUCCESS) {
         if (lastError) *lastError = ret;
-        delete stream->pstPack;
-        delete stream;
         return nullptr;
     }
-    
-    // 创建带自定义删除器的 shared_ptr
-    return EncodedStreamPtr(stream, [chn_id](VENC_STREAM_S* p) {
+
+    const auto* source = static_cast<const uint8_t*>(RK_MPI_MB_Handle2VirAddr(native_pack.pMbBlk));
+    if (!source || native_pack.u32Len == 0) {
+        RK_MPI_VENC_ReleaseStream(chn_id, &native_stream);
+        if (lastError) *lastError = RK_FAILURE;
+        return nullptr;
+    }
+
+    auto* copied_data = new (std::nothrow) uint8_t[native_pack.u32Len];
+    if (!copied_data) {
+        RK_MPI_VENC_ReleaseStream(chn_id, &native_stream);
+        if (lastError) *lastError = RK_FAILURE;
+        return nullptr;
+    }
+    std::memcpy(copied_data, source, native_pack.u32Len);
+
+    MB_EXT_CONFIG_S external{};
+    external.pu8VirAddr = copied_data;
+    external.u64Size = native_pack.u32Len;
+    external.pFreeCB = release_encoded_stream_copy;
+    external.pOpaque = copied_data;
+    MB_BLK copied_block = MB_INVALID_HANDLE;
+    ret = RK_MPI_SYS_CreateMB(&copied_block, &external);
+    if (ret != RK_SUCCESS || copied_block == MB_INVALID_HANDLE) {
+        delete[] copied_data;
+        RK_MPI_VENC_ReleaseStream(chn_id, &native_stream);
+        if (lastError) *lastError = ret;
+        return nullptr;
+    }
+
+    auto* stream = new (std::nothrow) VENC_STREAM_S(native_stream);
+    auto* pack = new (std::nothrow) VENC_PACK_S(native_pack);
+    if (!stream || !pack) {
+        delete stream;
+        delete pack;
+        RK_MPI_MB_ReleaseMB(copied_block);
+        RK_MPI_VENC_ReleaseStream(chn_id, &native_stream);
+        if (lastError) *lastError = RK_FAILURE;
+        return nullptr;
+    }
+    pack->pMbBlk = copied_block;
+    pack->u32Offset = 0;
+    stream->pstPack = pack;
+    stream->u32PackCount = 1;
+
+    RK_MPI_VENC_ReleaseStream(chn_id, &native_stream);
+
+    return EncodedStreamPtr(stream, [](VENC_STREAM_S* p) {
         if (p) {
-            RK_MPI_VENC_ReleaseStream(chn_id, p);
+            if (p->pstPack && p->pstPack->pMbBlk != MB_INVALID_HANDLE) {
+                RK_MPI_MB_ReleaseMB(p->pstPack->pMbBlk);
+            }
             delete p->pstPack;
             delete p;
         }

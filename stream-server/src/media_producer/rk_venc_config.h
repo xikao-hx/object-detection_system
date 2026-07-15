@@ -6,7 +6,8 @@
 
 namespace media {
 
-    inline int InitH264Venc(int channel, int width, int height, int bitrate_kbps, int framerate, int gop) {
+    inline int InitH264Venc(int channel, int width, int height, int bitrate_kbps, int framerate, int gop,
+                            int virtual_width = 0, int virtual_height = 0) {
         if (bitrate_kbps <= 0) {
             bitrate_kbps = 10 * 1024;
         }
@@ -16,6 +17,12 @@ namespace media {
         if (gop <= 0) {
             gop = framerate;
         }
+        if (virtual_width <= 0) {
+            virtual_width = width;
+        }
+        if (virtual_height <= 0) {
+            virtual_height = height;
+        }
 
         VENC_CHN_ATTR_S attributes{};
         attributes.stVencAttr.enType = RK_VIDEO_ID_AVC;
@@ -23,10 +30,10 @@ namespace media {
         attributes.stVencAttr.u32Profile = H264E_PROFILE_HIGH;
         attributes.stVencAttr.u32PicWidth = width;
         attributes.stVencAttr.u32PicHeight = height;
-        attributes.stVencAttr.u32VirWidth = width;
-        attributes.stVencAttr.u32VirHeight = height;
+        attributes.stVencAttr.u32VirWidth = virtual_width;
+        attributes.stVencAttr.u32VirHeight = virtual_height;
         attributes.stVencAttr.u32StreamBufCnt = 2;
-        attributes.stVencAttr.u32BufSize = width * height / 2;
+        attributes.stVencAttr.u32BufSize = virtual_width * virtual_height / 2;
 
         attributes.stRcAttr.enRcMode = VENC_RC_MODE_H264CBR;
         attributes.stRcAttr.stH264Cbr.u32Gop = gop;

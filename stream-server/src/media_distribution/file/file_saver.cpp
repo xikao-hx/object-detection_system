@@ -11,6 +11,7 @@
 #include "file_saver.h"
 #include "common/h264_nal_parser.h"
 #include "common/logger.h"
+#include "common/media_buffer.h"
 
 #include "rk_mpi_mb.h"
 #include "rk_mpi_vi.h"
@@ -295,7 +296,7 @@ bool Mp4Recorder::WriteFrame(const EncodedStreamPtr& stream) {
         return false;
     }
     
-    void* data = RK_MPI_MB_Handle2VirAddr(stream->pstPack->pMbBlk);
+    void* data = get_stream_vir_addr(stream);
     if (!data || stream->pstPack->u32Len == 0) {
         LOG_WARN("Invalid frame data");
         return false;

@@ -257,6 +257,62 @@ namespace media {
         return 0;
     }
 
+    int MediaManager::SetResolution(uvc::Resolution preset) {
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        if (current_mode_ != ProducerMode::UvcH264) {
+            LOG_WARN("UVC SetResolution ignored: current mode is {}", ProducerModeToString(current_mode_));
+            return -1;
+        }
+        if (uvc_resolution_ == preset) {
+            return 0;
+        }
+
+        const uvc::Resolution old_preset = uvc_resolution_;
+        if (!initialized_ || !producer_) {
+            uvc_resolution_ = preset;
+            return 0;
+        }
+
+        const bool was_running = manager_running_;
+        const auto rebuild = [this, was_running](uvc::Resolution target) {
+            if (producer_) {
+                producer_->Stop();
+                producer_->Deinit();
+                producer_.reset();
+            }
+
+            uvc_resolution_ = target;
+            producer_ = CreateProducerInstance(ProducerMode::UvcH264);
+            if (!producer_ || producer_->Init() != 0) {
+                return false;
+            }
+
+            ReregisterConsumers();
+            return !was_running || producer_->Start();
+        };
+
+        if (rebuild(preset)) {
+            const auto resolution = uvc::ResolutionConfig::FromPreset(preset);
+            LOG_INFO("UVC resolution changed to {}x{}", resolution.width, resolution.height);
+            return 0;
+        }
+
+        LOG_ERROR("Failed to initialize requested UVC resolution; restoring previous preset");
+        if (!rebuild(old_preset)) {
+            LOG_ERROR("Failed to restore previous UVC resolution");
+            if (producer_) {
+                producer_->Stop();
+                producer_->Deinit();
+                producer_.reset();
+            }
+            uvc_resolution_ = old_preset;
+            initialized_ = false;
+            manager_running_ = false;
+        }
+        return -1;
+    }
+
     int MediaManager::SetFrameRate(int fps) {
         std::lock_guard<std::mutex> lock(mutex_);
 
@@ -353,9 +409,12 @@ namespace media {
             }
             case ProducerMode::UvcH264: {
                 UvcH264Config uvc_config;
+                const auto resolution = uvc::ResolutionConfig::FromPreset(uvc_resolution_);
                 if (const char *device = std::getenv("AIPC_UVC_DEVICE")) {
                     uvc_config.capture.device = device;
                 }
+                uvc_config.capture.width = resolution.width;
+                uvc_config.capture.height = resolution.height;
                 uvc_config.capture.fps = config_.framerate;
                 uvc_config.bitrate_kbps = config_.bitrate_kbps;
                 uvc_config.gop = config_.framerate;

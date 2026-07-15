@@ -50,3 +50,6 @@ Step 8 正式： capture -> latest-frame mailbox(1) -> shared VDEC/RGA -> NV12 M
 - Step 7 仍是同一独立诊断 target 的显式模式：RGA 只通过 decoded/output MB 的 DMA fd 工作，NV12 pool 由 probe 私有拥有；它不改变正式 producer 或 distribution 的所有权。若验证通过，后续正式设计可在 producer 内部复用该硬件边界，但不能直接把 probe 生命周期变成公共 service。
 - Step 7 已通过三次板端 300 帧、约 30fps、零错误和 NV12 画面验收，证明 `VDEC YUV422P -> RGA NV12` 是正式 producer 的可行局部替换基础；下一步仍需单独设计 VDEC/RGA/VENC 生命周期、latest-frame 过载策略和失败传播。
 - Step 8 的共享硬件组件拥有按需加载的 full VDEC runtime、对应 SYS/VDEC 生命周期、decoded frame release 和 RGA output pool；`UvcH264Producer` 继续拥有 compact SYS、VENC、mailbox、capture 与 dispatcher。probe 和 producer 复用组件但分别编排顶层生命周期，SimpleIPC 不装载 full runtime。
+- Web 控制台只通过 producer API 选择板载 SimpleIPC 或双目 UVC，通过 pipeline status 渲染当前摄像头的分辨率能力；前端不复制后端 producer 状态，也不向 UVC 发送 SimpleIPC 专属分辨率切换请求。推理 API 可为兼容保留，但不属于当前监控页职责。
+- UVC 分辨率 preset 及尺寸映射归属 `media_producer/uvc` 配置层；`MediaManager` 保存当前 UVC preset 并拥有冷切换与失败恢复，HTTP/Web 只做模式分派和展示。每档尺寸继续沿 `UvcConfig -> VDEC/RGA/VENC` 传递，禁止在硬件链路各处复制分辨率判断。
+- VENC 原生 stream 的 Get/Release 必须停留在 encoded fetch thread；`common/media_buffer.h` 在该线程复制有效 H.264 pack、立即 Release，再以独立 MB 保持既有 `EncodedStreamPtr` 跨线程 consumer 接口，distribution 不持有原生 VENC ring buffer。

@@ -5,11 +5,9 @@
   // 状态变量
   // =====================================================================
   let status = 'loading';
-  let aiEnabled = false;
-  let modelName = 'none';
   let previewMode = 'websocket'; // 'websocket' | 'webrtc'
   let logs = [];
-  
+
   // 服务状态
   let services = {
     rtsp: { enabled: false, running: false, valid: false },
@@ -17,42 +15,43 @@
     recording: { enabled: false, active: false, output_dir: '' }
   };
 
-  // AI 统计
-  let aiStats = {
-      frames_processed: 0,
-      avg_inference_ms: 0,
-      total_detections: 0
+  let producerStatus = {
+      mode: 'uvc',
+      running: false,
+      available_modes: ['simple_ipc', 'uvc']
   };
-
-  // Python 编辑器状态
-  let pythonActive = false;
-  let pythonCode = '';
-  let pythonError = '';
-  let pythonDeploying = false;
-  let pythonModelInfo = { path: '', label_path: '', type: '' };
-        let pythonProjects = [];
-        let currentProjectName = '';
-
-  // 模型文件管理
-  let modelFiles = [];
-  let modelUploading = false;
-
-  // 编辑器面板显示状态
-  let showEditor = false;
+  let cameraSwitching = false;
 
   // 分辨率/管道配置
   let pipelineStatus = {
-      mode: 'parallel',   // 'parallel' | 'serial'
-      resolution: '1080p',
-      width: 1920,
-      height: 1080,
+      mode: 'uvc',
+      resolution: '1280x480',
+      width: 1280,
+      height: 480,
       framerate: 30,
       initialized: false,
       streaming: false,
-      available_resolutions: [],  // 可用分辨率列表，空表示不支持切换
-      note: ''                    // 额外提示信息
+      available_resolutions: ['1280x480'],
+      note: ''
   };
   let resolutionSwitching = false;
+
+  const resolutionCatalog = {
+      '3840x1080': { preset: '3840x1080', label: '双目 4K (3840×1080)', desc: '左右目各 1920×1080', width: 3840, height: 1080 },
+      '2560x720': { preset: '2560x720', label: '双目 2K (2560×720)', desc: '左右目各 1280×720', width: 2560, height: 720 },
+      '1280x480': { preset: '1280x480', label: '双目拼接 (1280×480)', desc: '左右目各 640×480', width: 1280, height: 480 },
+      '1080p': { preset: '1080p', label: '1080p (1920×1080)', desc: '板载摄像头高清模式', width: 1920, height: 1080 },
+      '720p': { preset: '720p', label: '720p (1280×720)', desc: '板载摄像头均衡模式', width: 1280, height: 720 },
+      '480p': { preset: '480p', label: '480p (720×480)', desc: '板载摄像头低带宽模式', width: 720, height: 480 }
+  };
+
+  $: resolutionOptions = (pipelineStatus.available_resolutions.length > 0
+      ? pipelineStatus.available_resolutions
+      : producerStatus.mode === 'uvc'
+          ? ['3840x1080', '2560x720', '1280x480']
+          : ['1080p', '720p', '480p'])
+      .map((preset) => resolutionCatalog[preset])
+      .filter(Boolean);
 
   // WebSocket H.264 相关
   let wsConnection = null;
@@ -142,16 +141,12 @@
           }
       }
 
-      const aiRes = await fetch('/api/ai/status');
-      if (aiRes.ok) {
-          const aiData = await aiRes.json();
-          if (aiData.success) {
-            const d = aiData.data;
-            aiEnabled = !!d.has_model;
-            modelName = d.has_model ? 'visiong' : 'none';
-            if (d.stats) {
-                aiStats = d.stats;
-            }
+      const producerRes = await fetch('/api/producer/status');
+      if (producerRes.ok) {
+          const producerData = await producerRes.json();
+          if (producerData.success && producerData.data) {
+              const mode = producerData.data.mode === 'UVC-H264' ? 'uvc' : 'simple_ipc';
+              producerStatus = { ...producerData.data, mode };
           }
       }
 
@@ -162,10 +157,10 @@
           if (pipelineData.success && pipelineData.data) {
               const d = pipelineData.data;
               pipelineStatus = {
-                  mode: d.mode || 'parallel',
-                  resolution: d.resolution?.preset || '1080p',
-                  width: d.resolution?.width || 1920,
-                  height: d.resolution?.height || 1080,
+                  mode: d.mode || 'uvc',
+                  resolution: d.resolution?.preset || '1280x480',
+                  width: d.resolution?.width || 1280,
+                  height: d.resolution?.height || 480,
                   framerate: d.resolution?.framerate || 30,
                   initialized: d.initialized || false,
                   streaming: d.streaming || false,
@@ -181,50 +176,39 @@
   }
 
   // =====================================================================
-  // AI 控制
+  // 摄像头控制
   // =====================================================================
-  async function toggleAI() {
-    if (aiEnabled) {
-      await switchModel('none');
-    } else {
-      // 不立即切换，打开编辑器让用户配置后再启动
-      openEditor();
-    }
-  }
-
-  async function switchModel(name) {
-      if (name === 'visiong') {
-          // 不立即切换模式，仅打开编辑器让用户配置
-          // 实际切换在用户点击"部署代码"时触发
-          openEditor();
-          return;
-      }
-
-      // 切换回 SimpleIPC（冷切换）
-      addLog('切换到纯监控模式...');
+  async function switchCamera(mode) {
+      if (cameraSwitching || producerStatus.mode === mode) return;
+      cameraSwitching = true;
+      const label = mode === 'uvc' ? '双目 USB 摄像头' : '板载摄像头';
+      addLog(`切换摄像头: ${label}...`);
       try {
           if (!isDev) {
-              const res = await fetch('/api/ai/switch', {
+              const res = await fetch('/api/producer/switch', {
                    method: 'POST',
                    headers: { 'Content-Type': 'application/json' },
-                   body: JSON.stringify({ model: 'none' })
+                   body: JSON.stringify({ mode })
               });
               const data = await res.json();
               if (data.success) {
-                  modelName = 'none';
-                  aiEnabled = false;
-                  addLog('已切换到纯监控模式', 'success');
+                  await fetchStatus();
                   await reconnectVideoStream();
+                  addLog(`摄像头已切换: ${label}`, 'success');
               } else {
-                  addLog(`切换失败: ${data.message}`, 'error');
+                  addLog(`摄像头切换失败: ${data.message}`, 'error');
               }
           } else {
-              modelName = 'none';
-              aiEnabled = false;
-              addLog('(Dev) 切换到纯监控模式', 'success');
+              producerStatus = { ...producerStatus, mode };
+              pipelineStatus = mode === 'uvc'
+                  ? { ...pipelineStatus, mode: 'uvc', resolution: '1280x480', width: 1280, height: 480, available_resolutions: ['3840x1080', '2560x720', '1280x480'] }
+                  : { ...pipelineStatus, mode: 'parallel', resolution: '1080p', width: 1920, height: 1080, available_resolutions: ['1080p', '720p', '480p'] };
+              addLog(`(Dev) 摄像头已切换: ${label}`, 'success');
           }
       } catch(e) {
-          addLog(`切换异常: ${e.message}`, 'error');
+          addLog(`摄像头切换异常: ${e.message}`, 'error');
+      } finally {
+          cameraSwitching = false;
       }
   }
 
@@ -253,9 +237,7 @@
               });
               const data = await res.json();
               if (data.success) {
-                  pipelineStatus.resolution = preset;
-                  pipelineStatus.width = data.data?.width || (preset === '1080p' ? 1920 : 720);
-                  pipelineStatus.height = data.data?.height || (preset === '1080p' ? 1080 : 480);
+                  await fetchStatus();
                   addLog(`分辨率切换成功: ${preset} (${pipelineStatus.width}x${pipelineStatus.height})`, 'success');
                   // 需要重新连接视频流
                   await reconnectVideoStream();
@@ -263,9 +245,10 @@
                   addLog(`分辨率切换失败: ${data.message}`, 'error');
               }
           } else {
+              const selected = resolutionCatalog[preset];
               pipelineStatus.resolution = preset;
-              pipelineStatus.width = preset === '1080p' ? 1920 : 720;
-              pipelineStatus.height = preset === '1080p' ? 1080 : 480;
+              pipelineStatus.width = selected?.width || pipelineStatus.width;
+              pipelineStatus.height = selected?.height || pipelineStatus.height;
               addLog(`(Dev) 切换到 ${preset}`, 'success');
           }
       } catch (e) {
@@ -290,265 +273,6 @@
               webrtcConnect();
           }
       }
-  }
-
-  // =====================================================================
-  // Python 编辑器
-  // =====================================================================
-  async function fetchPythonStatus() {
-      if (isDev) return;
-      try {
-          const res = await fetch('/api/python/status');
-          const data = await res.json();
-          if (data.success) {
-              pythonActive = data.data.active;
-              pythonError = data.data.last_error || '';
-              if (data.data.model) {
-                  pythonModelInfo = data.data.model;
-              }
-          }
-      } catch(e) { /* ignore */ }
-  }
-
-  async function fetchPythonProjects() {
-      if (isDev) return;
-      try {
-          const res = await fetch('/api/python/projects');
-          const data = await res.json();
-          if (data.success) {
-              pythonProjects = data.data || [];
-          }
-      } catch (e) { /* ignore */ }
-  }
-
-  async function loadPythonProject(name) {
-      if (isDev) return;
-      try {
-          const res = await fetch(`/api/python/projects/${encodeURIComponent(name)}`);
-          const data = await res.json();
-          if (data.success) {
-              pythonCode = data.data.code || '';
-              currentProjectName = data.data.name || name;
-              pythonError = '';
-              addLog(`已打开工程: ${currentProjectName}`, 'success');
-          } else {
-              addLog(`打开工程失败: ${data.message}`, 'error');
-          }
-      } catch (e) {
-          addLog(`打开工程异常: ${e.message}`, 'error');
-      }
-  }
-
-  async function saveCurrentProject() {
-      if (!currentProjectName) {
-          addLog('请先选择或创建工程', 'error');
-          return;
-      }
-      if (isDev) {
-          addLog('(Dev) 工程保存成功', 'success');
-          return;
-      }
-
-      try {
-          const res = await fetch(`/api/python/projects/${encodeURIComponent(currentProjectName)}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ code: pythonCode })
-          });
-          const data = await res.json();
-          if (data.success) {
-              addLog(`工程已保存: ${currentProjectName}`, 'success');
-          } else {
-              addLog(`保存失败: ${data.message}`, 'error');
-          }
-      } catch (e) {
-          addLog(`保存异常: ${e.message}`, 'error');
-      }
-  }
-
-  async function createProjectFromInput() {
-      const rawName = window.prompt('输入新工程名');
-      if (!rawName) return;
-
-      const name = rawName.trim();
-      if (!name) return;
-
-      if (isDev) {
-          currentProjectName = name;
-          pythonCode = '';
-          addLog(`(Dev) 已创建工程: ${name}`, 'success');
-          return;
-      }
-
-      try {
-          const res = await fetch('/api/python/projects/create', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ name })
-          });
-          const data = await res.json();
-          if (data.success) {
-              await fetchPythonProjects();
-              await loadPythonProject(data.data.name);
-          } else {
-              addLog(`创建工程失败: ${data.message}`, 'error');
-          }
-      } catch (e) {
-          addLog(`创建工程异常: ${e.message}`, 'error');
-      }
-  }
-
-  async function deleteCurrentProject() {
-      if (!currentProjectName) {
-          addLog('当前工程不可删除', 'error');
-          return;
-      }
-
-      if (!confirm(`确认删除工程 ${currentProjectName} ?`)) {
-          return;
-      }
-
-      try {
-          const res = await fetch(`/api/python/projects/${encodeURIComponent(currentProjectName)}`, {
-              method: 'DELETE'
-          });
-          const data = await res.json();
-          if (data.success) {
-              addLog(`已删除工程: ${currentProjectName}`, 'success');
-              currentProjectName = '';
-              pythonCode = '';
-              await fetchPythonProjects();
-          } else {
-              addLog(`删除失败: ${data.message}`, 'error');
-          }
-      } catch (e) {
-          addLog(`删除异常: ${e.message}`, 'error');
-      }
-  }
-
-  async function deployPythonCode() {
-      if (!pythonCode.trim()) return;
-      pythonDeploying = true;
-      try {
-          if (currentProjectName) {
-              await saveCurrentProject();
-          }
-
-          // 如果当前不在 VisionG 模式，需要先冷切换
-          if (!aiEnabled) {
-              addLog('启动 VisionG AI 模式（冷切换中，请稍候）...');
-              if (!isDev) {
-                  const switchRes = await fetch('/api/ai/switch', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ model: 'visiong' })
-                  });
-                  const switchData = await switchRes.json();
-                  if (!switchData.success) {
-                      addLog(`VisionG 启动失败: ${switchData.message}`, 'error');
-                      return;
-                  }
-              }
-              modelName = 'visiong';
-              aiEnabled = true;
-              addLog('VisionG AI 模式已启动', 'success');
-              await reconnectVideoStream();
-          }
-
-          // 部署 Python 代码（热更新）
-          if (!currentProjectName) {
-              addLog('请先选择一个工程后再部署', 'error');
-              return;
-          }
-
-          addLog(`部署工程: ${currentProjectName}...`);
-          if (!isDev) {
-              const res = await fetch('/api/python/deploy', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                      project: currentProjectName
-                  })
-              });
-              const data = await res.json();
-              if (data.success) {
-                  pythonError = '';
-                  addLog(`工程部署成功: ${currentProjectName}`, 'success');
-              } else {
-                  pythonError = data.data?.error || data.message;
-                  addLog('代码错误: ' + pythonError, 'error');
-              }
-          } else {
-              pythonError = '';
-              addLog('(Dev) 代码部署成功', 'success');
-          }
-      } catch(e) {
-          addLog('部署失败: ' + e.message, 'error');
-      } finally {
-          pythonDeploying = false;
-      }
-  }
-
-  async function fetchModelList() {
-      if (isDev) return;
-      try {
-          const res = await fetch('/api/model/list');
-          const data = await res.json();
-          if (data.success) {
-              modelFiles = data.data;
-          }
-      } catch(e) { /* ignore */ }
-  }
-
-  async function uploadModelFile(event) {
-      const file = event.target.files[0];
-      if (!file) return;
-      modelUploading = true;
-      addLog(`上传模型文件: ${file.name}...`);
-      try {
-          const formData = new FormData();
-          formData.append('file', file);
-          const res = await fetch('/api/model/upload', { method: 'POST', body: formData });
-          const data = await res.json();
-          if (data.success) {
-              addLog(`上传成功: ${file.name}`, 'success');
-              await fetchModelList();
-          } else {
-              addLog(`上传失败: ${data.message}`, 'error');
-          }
-      } catch(e) {
-          addLog('上传异常: ' + e.message, 'error');
-      } finally {
-          modelUploading = false;
-          event.target.value = '';
-      }
-  }
-
-  async function deleteModelFile(name) {
-      addLog(`删除模型: ${name}...`);
-      try {
-          const res = await fetch(`/api/model/${encodeURIComponent(name)}`, { method: 'DELETE' });
-          const data = await res.json();
-          if (data.success) {
-              addLog(`已删除: ${name}`, 'success');
-              await fetchModelList();
-          } else {
-              addLog(`删除失败: ${data.message}`, 'error');
-          }
-      } catch(e) {
-          addLog('删除异常: ' + e.message, 'error');
-      }
-  }
-
-  async function openEditor() {
-      showEditor = true;
-      await fetchPythonStatus();
-      await fetchPythonProjects();
-      if (!currentProjectName && pythonProjects.length > 0) {
-          const first = pythonProjects[0];
-          await loadPythonProject(first.name);
-      }
-      await fetchModelList();
   }
 
   // =====================================================================
@@ -1011,30 +735,15 @@
                        {/if}
                    {/if}
 
-                   <!-- AI 状态覆盖 -->
-                   {#if aiEnabled}
-                     <div class="absolute top-4 left-4 z-10">
-                         <div class="bg-black/70 backdrop-blur-sm text-white px-3 py-2 rounded-lg text-xs border border-white/10 shadow-lg">
-                             <div class="font-bold text-primary mb-1 flex items-center">
-                                 <span class="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></span>
-                                 AI {modelName.toUpperCase()}
-                             </div>
-                         </div>
-                     </div>
-                   {/if}
                </div>
 
                <!-- 视频底部参数栏 -->
-               <div class="bg-gray-900 text-gray-400 text-xs px-4 py-2 flex justify-between items-center border-t border-gray-800">
+               <div class="bg-gray-900 text-gray-400 text-xs px-4 py-2 border-t border-gray-800">
                    <div class="flex space-x-4 font-mono">
                        <span>RES: <span class="text-white">{previewMode === 'websocket' ? wsStats.resolution : rtcStats.resolution}</span></span>
                        <span>FPS: <span class="text-white">{previewMode === 'websocket' ? wsStats.fps : rtcStats.fps}</span></span>
                        <span>BITRATE: <span class="text-white">{previewMode === 'websocket' ? wsStats.bitrate : rtcStats.bitrate}</span></span>
                        <span>RX: <span class="text-white">{previewMode === 'websocket' ? wsStats.received : rtcStats.received}</span></span>
-                   </div>
-                   <div class="flex space-x-4">
-                       <span>INF: <span class="text-yellow-400">{aiStats.avg_inference_ms || 0}ms</span></span>
-                       <span>DET: <span class="text-green-400">{aiStats.total_detections || 0}</span></span>
                    </div>
                </div>
            </div>
@@ -1060,54 +769,34 @@
 
        <!-- 右侧: 控制面板 -->
        <div class="space-y-4 overflow-y-auto">
-           <!-- AI 控制 -->
+           <!-- 摄像头选择 -->
            <div class="bg-white rounded-xl shadow-sm p-5 border border-gray-100">
-               <h3 class="text-gray-500 text-xs font-bold mb-4 uppercase tracking-wider">AI 模型</h3>
-               
-               <div class="flex items-center justify-between mb-4 bg-gray-50 p-3 rounded-lg">
-                   <span class="font-bold text-gray-800 text-sm">启用推理</span>
-                   <button 
-                     on:click={toggleAI}
-                     class={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 ${aiEnabled ? 'bg-primary' : 'bg-gray-300'}`}
-                   >
-                     <span class={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${aiEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
-                   </button>
-               </div>
-               
+               <h3 class="text-gray-500 text-xs font-bold mb-4 uppercase tracking-wider">摄像头</h3>
                <div class="space-y-2">
-                   <button 
-                     class={`w-full py-2.5 px-3 rounded-lg text-xs font-medium transition-all flex items-center justify-between group ${!aiEnabled ? 'bg-primary text-white shadow-lg shadow-primary/20 ring-1 ring-primary' : 'bg-white border border-gray-200 text-gray-600 hover:border-primary/50 hover:text-primary'}`}
-                     on:click={() => switchModel('none')}
-                     disabled={!aiEnabled}
+                   <button
+                     class={`w-full py-2.5 px-3 rounded-lg text-xs font-medium transition-all flex items-center justify-between ${producerStatus.mode === 'simple_ipc' ? 'bg-primary text-white shadow-lg shadow-primary/20 ring-1 ring-primary' : 'bg-white border border-gray-200 text-gray-600 hover:border-primary/50 hover:text-primary'}`}
+                     on:click={() => switchCamera('simple_ipc')}
+                     disabled={cameraSwitching}
                    >
-                     <span>纯监控 (SimpleIPC)</span>
-                     {#if !aiEnabled}
+                     <span>板载摄像头 (SimpleIPC)</span>
+                     {#if producerStatus.mode === 'simple_ipc'}
                         <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
                      {/if}
                    </button>
-                   <button 
-                     class={`w-full py-2.5 px-3 rounded-lg text-xs font-medium transition-all flex items-center justify-between group ${aiEnabled ? 'bg-primary text-white shadow-lg shadow-primary/20 ring-1 ring-primary' : 'bg-white border border-gray-200 text-gray-600 hover:border-primary/50 hover:text-primary'}`}
-                     on:click={() => switchModel('visiong')}
+                   <button
+                     class={`w-full py-2.5 px-3 rounded-lg text-xs font-medium transition-all flex items-center justify-between ${producerStatus.mode === 'uvc' ? 'bg-primary text-white shadow-lg shadow-primary/20 ring-1 ring-primary' : 'bg-white border border-gray-200 text-gray-600 hover:border-primary/50 hover:text-primary'}`}
+                     on:click={() => switchCamera('uvc')}
+                     disabled={cameraSwitching}
                    >
-                     <span>VisionG AI</span>
-                     {#if aiEnabled}
+                     <span>双目 USB 摄像头 (UVC)</span>
+                     {#if producerStatus.mode === 'uvc'}
                         <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
                      {/if}
                    </button>
                </div>
-
-               <!-- Python 编辑器快捷入口（始终可用） -->
-               <button
-                 class={`w-full mt-3 py-2 px-3 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-2 ${aiEnabled ? 'bg-amber-500 text-white hover:bg-amber-600' : 'bg-amber-100 text-amber-700 hover:bg-amber-200'}`}
-                 on:click={openEditor}
-               >
-                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
-                 {aiEnabled ? '打开 Python 编辑器' : '配置并启动 VisionG'}
-               </button>
            </div>
 
-           <!-- 分辨率设置（仅 SimpleIPC 模式显示） -->
-           {#if !aiEnabled}
+           <!-- 当前摄像头支持的分辨率 -->
            <div class="bg-white rounded-xl shadow-sm p-5 border border-gray-100">
                <h3 class="text-gray-500 text-xs font-bold mb-4 uppercase tracking-wider">分辨率</h3>
                
@@ -1119,20 +808,10 @@
                    </div>
                </div>
                
-               <!-- 分辨率切换的提示 -->
-               {#if !pipelineStatus.initialized || pipelineStatus.available_resolutions.length === 0}
-                   <div class="mb-3 p-2 bg-gray-100 border border-gray-200 rounded-lg text-xs text-gray-600">
-                       当前使用固定分辨率模式，不支持动态切换
-                   </div>
-               {/if}
-               
                <!-- 分辨率选择按钮 -->
                <div class="space-y-2">
-                   {#each [
-                       { preset: '1080p', label: '1080p (1920×1080)', desc: 'IPC 高清模式' },
-                       { preset: '480p', label: '480p (720×480)', desc: 'IPC 低带宽模式' }
-                   ] as res}
-                   {@const isDisabled = !pipelineStatus.initialized || pipelineStatus.available_resolutions.length === 0}
+                   {#each resolutionOptions as res}
+                   {@const isDisabled = !pipelineStatus.initialized}
                    <button 
                      class={`w-full py-2.5 px-3 rounded-lg text-xs font-medium transition-all flex items-center justify-between group 
                        ${pipelineStatus.resolution === res.preset 
@@ -1154,6 +833,12 @@
                    </button>
                    {/each}
                </div>
+
+               {#if producerStatus.mode === 'uvc'}
+                   <div class="mt-3 p-2.5 bg-blue-50 border border-blue-100 rounded-lg text-xs text-blue-700">
+                       双目相机输出左右水平拼接画面，切换分辨率时视频流会短暂重启。
+                   </div>
+               {/if}
                
                <!-- 切换中提示 -->
                {#if resolutionSwitching}
@@ -1166,7 +851,6 @@
                    </div>
                {/if}
            </div>
-           {/if}
 
            <!-- 服务控制 -->
            <div class="bg-white rounded-xl shadow-sm p-5 border border-gray-100">
@@ -1240,149 +924,4 @@
     </div>
   </div>
 
-  <!-- Python 编辑器面板（全屏浮层） -->
-  {#if showEditor}
-    <div class="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex p-0 sm:p-4">
-        <div class="bg-white shadow-2xl w-full h-full sm:h-[calc(100vh-2rem)] sm:max-w-6xl sm:mx-auto rounded-none sm:rounded-2xl flex flex-col overflow-hidden">
-      <!-- 头部 -->
-      <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between bg-gray-50">
-        <div class="flex items-center gap-3">
-          <div class="w-8 h-8 bg-amber-100 rounded-lg flex items-center justify-center text-amber-600">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
-          </div>
-          <div>
-                        <h2 class="font-bold text-gray-800">VisionG Python 工程编辑器</h2>
-                        <p class="text-xs text-gray-500">Python 负责编写完整 AI 处理逻辑，AIPC 负责后续编码与流媒体分发</p>
-          </div>
-        </div>
-        <div class="flex items-center gap-3">
-          {#if pythonError}
-            <span class="text-xs text-red-500 bg-red-50 px-2 py-1 rounded">错误</span>
-          {:else if pythonActive}
-            <span class="text-xs text-green-600 bg-green-50 px-2 py-1 rounded">运行中</span>
-          {/if}
-          <button on:click={() => showEditor = false} class="p-2 hover:bg-gray-200 rounded-lg transition-colors">
-            <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-          </button>
-        </div>
-      </div>
-
-      <!-- 内容区 -->
-      <div class="flex-1 flex overflow-hidden">
-        <!-- 左侧：代码编辑器 -->
-        <div class="flex-1 flex flex-col border-r border-gray-200">
-          <!-- 工具栏 -->
-                    <div class="px-4 py-2 bg-gray-50 border-b border-gray-200 flex items-center gap-2 flex-wrap">
-                        <select
-                            class="text-xs border border-gray-300 rounded-lg px-2 py-1.5 bg-white min-w-48"
-                            value={currentProjectName}
-                            on:change={async (e) => {
-                                const v = e.target.value || '';
-                                if (!v) return;
-                                await loadPythonProject(v);
-                            }}
-                        >
-                            <option value="">选择工程...</option>
-                            {#each pythonProjects as p}
-                                <option value={p.name}>{p.name}</option>
-                            {/each}
-                        </select>
-
-                        <button
-                            on:click={createProjectFromInput}
-                            class="px-3 py-1.5 bg-white border border-gray-300 text-gray-700 text-xs font-bold rounded-lg hover:border-primary hover:text-primary"
-                        >
-                            新建工程
-                        </button>
-
-                        <button
-                            on:click={saveCurrentProject}
-                            disabled={!currentProjectName}
-                            class={`px-3 py-1.5 text-xs font-bold rounded-lg ${!currentProjectName ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-white border border-gray-300 text-gray-700 hover:border-primary hover:text-primary'}`}
-                        >
-                            保存工程
-                        </button>
-
-                        <button
-                            on:click={deleteCurrentProject}
-                            disabled={!currentProjectName}
-                            class={`px-3 py-1.5 text-xs font-bold rounded-lg ${!currentProjectName ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-white border border-red-200 text-red-500 hover:bg-red-50'}`}
-                        >
-                            删除工程
-                        </button>
-
-            <button
-              on:click={deployPythonCode}
-              disabled={pythonDeploying}
-              class={`px-4 py-1.5 text-white text-xs font-bold rounded-lg disabled:opacity-50 flex items-center gap-2 ${aiEnabled ? 'bg-green-500 hover:bg-green-600' : 'bg-primary hover:bg-primary/90'}`}
-            >
-              {#if pythonDeploying}
-                <svg class="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-              {/if}
-              {aiEnabled ? '部署代码' : '部署并启动 VisionG'}
-            </button>
-
-                                                {#if currentProjectName}
-                                                        <span class="text-xs px-2 py-1 rounded bg-blue-100 text-blue-700">
-                                                                当前工程: {currentProjectName}
-                                                        </span>
-                                                {/if}
-          </div>
-
-          <!-- 代码编辑区 -->
-          <textarea
-            bind:value={pythonCode}
-            class="flex-1 w-full p-4 font-mono text-sm leading-relaxed resize-none focus:outline-none bg-gray-900 text-green-400"
-            spellcheck="false"
-            placeholder="# 在此编写 Python 后处理代码&#10;&#10;def process(image, detections):&#10;    bgr = image.to_format('bgr')&#10;    for det in detections:&#10;        x, y, w, h = det.box&#10;        bgr.draw_rectangle(x, y, w, h, color=(0,255,0))&#10;    return bgr"
-          ></textarea>
-
-          <!-- 错误信息 -->
-          {#if pythonError}
-            <div class="px-4 py-2 bg-red-50 border-t border-red-200 text-xs text-red-600 font-mono max-h-24 overflow-y-auto">
-              {pythonError}
-            </div>
-          {/if}
-        </div>
-
-        <!-- 右侧：模型管理面板 -->
-        <div class="w-72 flex flex-col bg-gray-50 overflow-y-auto">
-          <!-- 模型文件管理 -->
-          <div class="p-4">
-            <h3 class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">模型文件</h3>
-
-            <label class="w-full py-2 px-3 bg-white border border-dashed border-gray-300 rounded-lg text-xs text-gray-500 cursor-pointer hover:border-primary hover:text-primary transition-colors flex items-center justify-center gap-2 mb-3">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
-              {modelUploading ? '上传中...' : '上传 .rknn / .txt 文件'}
-              <input type="file" accept=".rknn,.txt" class="hidden" on:change={uploadModelFile} disabled={modelUploading}>
-            </label>
-
-            <div class="space-y-1">
-              {#each modelFiles as f}
-                <div class="flex items-center justify-between py-1.5 px-2 bg-white rounded border border-gray-100 text-xs">
-                  <div class="flex-1 min-w-0">
-                    <div class="truncate font-medium text-gray-700">{f.name}</div>
-                    <div class="text-[10px] text-gray-400">{(f.size / 1024 / 1024).toFixed(1)} MB</div>
-                  </div>
-                  {#if f.name !== 'yolov5.rknn' && f.name !== 'coco_80_labels_list.txt'}
-                    <button
-                      on:click={() => deleteModelFile(f.name)}
-                      class="ml-2 p-1 text-gray-400 hover:text-red-500 transition-colors"
-                      title="删除"
-                    >
-                      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-                    </button>
-                  {/if}
-                </div>
-              {/each}
-              {#if modelFiles.length === 0}
-                <div class="text-xs text-gray-400 text-center py-4">加载中...</div>
-              {/if}
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-  {/if}
 </main>

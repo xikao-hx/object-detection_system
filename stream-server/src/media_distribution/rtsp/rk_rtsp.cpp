@@ -12,6 +12,7 @@
 #include "rk_rtsp.h"
 #include "rtsp_demo.h"
 #include "common/logger.h"
+#include "common/media_buffer.h"
 
 #include "rk_mpi_mb.h"
 #include <thread>
@@ -116,8 +117,8 @@ bool RtspServer::SendVideoFrame(const EncodedStreamPtr& stream) {
         return false;
     }
 
-    // 从 MPI buffer 获取虚拟地址
-    void* data = RK_MPI_MB_Handle2VirAddr(stream->pstPack->pMbBlk);
+    // 从 MPI buffer 获取当前 pack 的有效数据地址（包含 VENC ring buffer offset）
+    void* data = get_stream_vir_addr(stream);
     if (!data) {
         LOG_ERROR("Failed to get virtual address from MB handle");
         stats_.errors++;

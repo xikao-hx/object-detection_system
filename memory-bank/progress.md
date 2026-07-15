@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-- 当前实施状态：双目 UVC Step 1、Step 3、Step 4、Step 5、Step 6、Step 7、Step 8 均已通过板端验收。
+- 当前实施状态：双目 UVC Step 1、Step 3、Step 4、Step 5、Step 6、Step 7、Step 8、Step 9、Step 10 均已通过板端及页面验收。
 - Step 1 已通过 Luckfox 板端实机验收。
 - Step 2 已按用户要求取消，相关未交付代码已撤销。
 - Step 3 已于 2026-07-13 由用户确认验收通过。
@@ -116,6 +116,25 @@
 - 补充已落地的 SimpleIPC/UVC producer、UVC H.264 数据流、目录职责、分范围验证命令和板端验收路径。
 - 本次仅维护协作说明，不改变业务代码、HTTP API、模块职责或依赖方向。
 - 验证：`git diff --check`；对未跟踪的 `AGENTS.md` 额外执行 `git diff --no-index --check /dev/null AGENTS.md`。
+
+## 2026-07-15：Step 9 Web 控制台摄像头与分辨率适配
+
+- 移除页面中的 AI/VisionG、推理统计、Python 编辑器和模型管理模板及前端 API 请求，后端兼容 endpoint 不修改。
+- 原 SimpleIPC/VisionG 按钮改为板载摄像头与双目 USB 摄像头，调用既有 `/api/producer/status`、`/api/producer/switch`，切换成功后刷新 pipeline 并重连当前预览。
+- 分辨率选项由摄像头模式决定：SimpleIPC 根据 `/api/pipeline/status.available_resolutions` 展示 1080p/720p/480p；UVC 展示不可误切换的 `1280x480` 双目水平拼接规格。
+- `npm run build` 通过，发布 JS 从约 52.52 kB 降为 38.48 kB；构建产物中已无 VisionG、推理和 Python/model API 文本。等待板端页面人工验收，当前不提交。
+
+## 2026-07-15：Step 10 UVC 三档双目分辨率冷切换
+
+- UVC 配置层新增 `3840x1080`、`2560x720`、`1280x480` 三档 preset；`MediaManager` 保存当前 preset，冷切换时完整重建 capture/VDEC/RGA/VENC/dispatcher，失败时尝试恢复旧 preset。
+- `/api/pipeline/status` 在 UVC 模式追加三档 `available_resolutions` 并返回当前真实尺寸；既有 `/api/pipeline/resolution` 按当前 producer 分派，成功仍返回 HTTP 200、`success=true`、`message="Resolution switched"`，SimpleIPC 字段与行为保持。
+- Web UVC 分辨率卡改为只渲染后端能力并可切换三档，分别标明左右目单目尺寸；不增加帧率选择，切换后刷新状态并重连预览。
+- 首次 `3840x1080` 实机暴露 CAL virtual height `1088` 与 VENC `1080` 不匹配；共享 VENC helper 已支持显式 virtual width/height，UVC 传入 CAL layout 后恢复 H.264 输出。
+- 复核 VENC 生命周期发现原生 stream 可能由异步 consumer thread 释放，与 Get/Release 同线程约束冲突；公共取流边界现改为 fetch thread 内复制 H.264 pack并立即 Release，副本以独立 MB 保持既有 `EncodedStreamPtr`/distribution 接口。
+- 板端自动验证：`3840x1080` 连续超过 1400 capture 帧、500 output 帧，实测约 `17.66/6.99fps`；`2560x720` 超过 700/500 帧，约 `16.64/11.40fps`；切回 `1280x480` 后超过 900 帧，capture/output 约 `15.29fps`。三档 sequence gap 均为 0，未见 VDEC/RGA/VENC send error。
+- RTSP 实际报告 H.264 `3840x1080`、`2560x720`、`1280x480`。2560 与 1280 分别连续解码 15 秒无错误；3840 客户端中途接入时首个 GOP 出现 3 帧参考缺失，随后连续 25 秒无新增错误，记为等待下一个 IDR 的接入现象，不是持续码流损坏。
+- Debug 交叉构建、install、Web `npm run build` 和板端部署均通过；板端当前恢复为 `1280x480` 并持续出流。仍需用户在 Web 页面人工确认三档画面比例、清晰度、左右目拼接及切换交互，通过前不提交 Step 9/10。
+- 用户已在最终部署页面确认三档分辨率、双目画面和切换交互通过；Step 9/10 验收完成，可以提交。
 
 ## 历史背景
 
