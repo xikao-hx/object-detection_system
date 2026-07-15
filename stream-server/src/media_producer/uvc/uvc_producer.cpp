@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <fcntl.h>
@@ -215,6 +216,15 @@ namespace media::uvc {
             buffers.clear();
         }
 
+        void ResetStatistics() {
+            captured_frames = 0;
+            sequence_gaps = 0;
+            copy_time_ms = 0.0;
+            max_copy_time_ms = 0.0;
+            has_last_sequence = false;
+            statistics_started = {};
+        }
+
         void CaptureLoop() {
             while (running.load()) {
                 pollfd descriptor{};
@@ -260,6 +270,7 @@ namespace media::uvc {
                               buffer.bytesused);
                     running.store(false);
                 } else if (buffer.bytesused > 0) {
+                    const auto copy_started = std::chrono::steady_clock::now();
                     frame = std::make_shared<UvcFrame>();
                     const auto *begin = static_cast<const uint8_t *>(buffers[buffer.index].address);
                     frame->data.assign(begin, begin + buffer.bytesused);
@@ -268,7 +279,32 @@ namespace media::uvc {
                     frame->sequence = buffer.sequence;
                     frame->timestamp_us = static_cast<uint64_t>(buffer.timestamp.tv_sec) * 1000000ULL +
                                           static_cast<uint64_t>(buffer.timestamp.tv_usec);
+                    const auto copy_finished = std::chrono::steady_clock::now();
+                    const double copy_ms =
+                            std::chrono::duration<double, std::milli>(copy_finished - copy_started).count();
+                    copy_time_ms += copy_ms;
+                    max_copy_time_ms = std::max(max_copy_time_ms, copy_ms);
 
+                    if (has_last_sequence) {
+                        const uint32_t delta = buffer.sequence - last_sequence;
+                        if (delta > 1U && delta < 0x80000000U) {
+                            sequence_gaps += delta - 1U;
+                        }
+                    }
+                    last_sequence = buffer.sequence;
+                    has_last_sequence = true;
+
+                    ++captured_frames;
+                    if (captured_frames == 1) {
+                        statistics_started = copy_finished;
+                    } else if (captured_frames % 100 == 0) {
+                        const double seconds =
+                                std::chrono::duration<double>(copy_finished - statistics_started).count();
+                        LOG_INFO("UVC capture: frames={}, fps={:.2f}, sequence_gaps={}, "
+                                 "copy_ms(avg/max)={:.3f}/{:.3f}",
+                                 captured_frames, seconds > 0.0 ? (captured_frames - 1) / seconds : 0.0,
+                                 sequence_gaps, copy_time_ms / captured_frames, max_copy_time_ms);
+                    }
                 }
 
                 if (Xioctl(fd, VIDIOC_QBUF, &buffer) != 0) {
@@ -307,6 +343,13 @@ namespace media::uvc {
         std::thread capture_thread;
         std::atomic<bool> initialized{false};
         std::atomic<bool> running{false};
+        uint64_t captured_frames = 0;
+        uint64_t sequence_gaps = 0;
+        uint32_t last_sequence = 0;
+        bool has_last_sequence = false;
+        double copy_time_ms = 0.0;
+        double max_copy_time_ms = 0.0;
+        std::chrono::steady_clock::time_point statistics_started;
     };
 
     UvcProducer::UvcProducer(UvcConfig config) : impl_(std::make_unique<Impl>(std::move(config))) {}
@@ -459,6 +502,7 @@ namespace media::uvc {
             return false;
         }
 
+        impl_->ResetStatistics();
         impl_->running.store(true);
         try {
             impl_->capture_thread = std::thread(&Impl::CaptureLoop, impl_.get());

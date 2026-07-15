@@ -84,3 +84,22 @@ set_target_properties(uvc_capture_test PROPERTIES
     BUILD_WITH_INSTALL_RPATH TRUE
     INSTALL_RPATH "$ORIGIN/../lib"
 )
+
+add_executable(uvc_vdec_probe uvc_vdec_probe.cpp)
+target_link_directories(uvc_vdec_probe PRIVATE
+    ${LUCKFOX_MPI_LIB_DIR}
+    ${BUILDROOT_SYSROOT}/usr/lib
+)
+target_link_libraries(uvc_vdec_probe PRIVATE
+    uvc_lib
+    rockit_full
+    rockchip_mpp
+    drm
+    rga
+)
+target_compile_options(uvc_vdec_probe PRIVATE -Wall -Wextra)
+set_target_properties(uvc_vdec_probe PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+    BUILD_WITH_INSTALL_RPATH TRUE
+    INSTALL_RPATH "$ORIGIN/../lib"
+)

@@ -6,6 +6,7 @@
 #include "i_media_producer.h"
 
 #include <atomic>
+#include <chrono>
 #include <exception>
 #include <string>
 #include <thread>
@@ -81,6 +82,7 @@ namespace media {
         void FetchLoop() {
             uint64_t frame_count = 0;
             uint64_t consecutive_errors = 0;
+            std::chrono::steady_clock::time_point statistics_started;
             while (running_.load()) {
                 RK_S32 last_error = 0;
                 auto stream = acquire_encoded_stream(venc_channel_, 1000, &last_error);
@@ -96,6 +98,17 @@ namespace media {
 
                 ++frame_count;
                 consecutive_errors = 0;
+                const auto now = std::chrono::steady_clock::now();
+                if (frame_count == 1) {
+                    statistics_started = now;
+                } else if (frame_count % 100 == 0) {
+                    const double seconds =
+                            std::chrono::duration<double>(now - statistics_started).count();
+                    SPDLOG_LOGGER_INFO(GetEncodedDispatcherLogger(),
+                                       "VENC H.264 output: channel={}, frames={}, fps={:.2f}",
+                                       venc_channel_, frame_count,
+                                       seconds > 0.0 ? (frame_count - 1) / seconds : 0.0);
+                }
                 if (frame_count <= 5 || frame_count % 300 == 0) {
                     SPDLOG_LOGGER_DEBUG(GetEncodedDispatcherLogger(), "Encoded frame #{}, size={} bytes",
                                         frame_count, stream->pstPack ? stream->pstPack->u32Len : 0);
