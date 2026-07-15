@@ -362,3 +362,7 @@ owned MJPEG -> external input MB -> VDEC YUV422P MB (VDEC owns)
 - `--convert-nv12`、CAL 布局、私有 DMA pool、RGA `imcheck/imcvtcolor`、packed NV12 保存和分阶段统计已实现。
 - Debug 交叉构建无告警，install 与 `git diff --check` 通过；ELF 直接依赖包含 `librga.so`，RPATH 为 `$ORIGIN/../lib`，安装包已携带该库。
 - 固定板端 SSH 当前返回 connection refused，实机能力与性能门禁尚未执行。
+- 后续首次实机运行连续完成 300 帧：RGA avg/max `1.229/2.314ms`，pipeline avg/max `21.401/46.818ms`，最终 `30.10fps`、sequence gap 0、VDEC 错误全 0；NV12 packed 输出为预期 921600 bytes。
+- 当前只完成首次性能与布局验证；两次重复运行和画面方向/亮度/色彩人工确认仍是最终验收门禁。
+- 两次追加运行均返回 0并保持约 30fps、sequence gap 0、RGA avg 约 `1.23ms`、pipeline avg 约 `21.8ms`、零 VDEC 错误和正常释放；三次运行门禁通过。
+- 拉回的 repeat2 NV12 为准确的 921600 bytes；按 NV12 `1280x480` 转图后，双目水平拼接、亮度和色彩正常，无 plane/stride/几何异常。Step 7 验收完成，可进入正式 VDEC/RGA/VENC 生产化设计，但不得直接复制 probe 生命周期。

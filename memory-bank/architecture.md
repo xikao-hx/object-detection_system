@@ -47,3 +47,4 @@ Step 7 probe： /dev/videoX -> UvcProducer owned MJPEG -> RKMPI VDEC YUV422P -> 
 - Step 6 的 VDEC 是独立诊断 target，固定独占 channel 0 并要求正式服务停止后运行；它不改变 `MediaManager`、正式 producer 或 distribution 的依赖和所有权。该步骤已完成板端验收，正式替换前仍需独立证明 YUV422P -> NV12 转换后的端到端帧预算。
 - VDEC decoded frame 的 pixel format 必须以每帧 `VIDEO_FRAME_INFO_S` 为准；请求 NV12 不代表 JPEG hardware decoder 必然执行 chroma resampling。该相机实测返回 YUV422P，后续格式转换仍应位于 producer 内部硬件处理边界，不能下沉到通用 UVC capture 或上浮到 distribution。
 - Step 7 仍是同一独立诊断 target 的显式模式：RGA 只通过 decoded/output MB 的 DMA fd 工作，NV12 pool 由 probe 私有拥有；它不改变正式 producer 或 distribution 的所有权。若验证通过，后续正式设计可在 producer 内部复用该硬件边界，但不能直接把 probe 生命周期变成公共 service。
+- Step 7 已通过三次板端 300 帧、约 30fps、零错误和 NV12 画面验收，证明 `VDEC YUV422P -> RGA NV12` 是正式 producer 的可行局部替换基础；下一步仍需单独设计 VDEC/RGA/VENC 生命周期、latest-frame 过载策略和失败传播。

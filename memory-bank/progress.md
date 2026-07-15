@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-- 当前实施状态：双目 UVC Step 1、Step 3、Step 4、Step 5、Step 6 均已通过板端验收；Step 7 RGA YUV422P -> NV12 独立 probe 实施中。
+- 当前实施状态：双目 UVC Step 1、Step 3、Step 4、Step 5、Step 6、Step 7 均已通过板端验收。
 - Step 1 已通过 Luckfox 板端实机验收。
 - Step 2 已按用户要求取消，相关未交付代码已撤销。
 - Step 3 已于 2026-07-13 由用户确认验收通过。
@@ -94,6 +94,10 @@
 - 边界：不修改正式 `UvcH264Producer`、VENC、distribution 或 HTTP；板端通过前不接入正式数据流。
 - 当前状态：独立 RGA probe 已实现并通过 Debug 交叉构建；安装包显式携带新增的直接依赖 `librga.so`，等待板端验收。
 - 部署尝试：固定地址 `root@192.168.5.9` 的 SSH 端口拒绝连接，未修改板端文件；连接恢复后从部署和 300 帧 probe 继续。
+- 首次板端结果：300 帧完成，capture/VDEC+RGA 为 `30.07/30.10fps`、sequence gap 0；RGA avg/max `1.229/2.314ms`，pipeline avg/max `21.401/46.818ms`，VDEC 错误计数全 0，停止和资源释放正常。
+- 输出 NV12 为 `1280x480`、stride 1280、block/packed 921600 bytes。首次性能和文件布局门禁通过；等待两次重复运行及用户人工确认画面后再完成 Step 7。
+- Codex 通过固定板端 SSH 独立完成后续两次 300 帧运行，远程退出码均为 0：repeat1/repeat2 最终 `30.05/30.03fps`，capture `30.03/30.02fps`，sequence gap 均为 0；RGA avg/max 为 `1.236/2.106ms` 与 `1.234/2.189ms`，pipeline avg/max 为 `21.861/73.228ms` 与 `21.807/61.188ms`，VDEC 错误计数全 0并正常释放。
+- repeat2 NV12 已拉回本机，实际大小 921600 bytes，并以 `nv12 1280x480` 转为 PNG 检查：左右目完整且拼接边界正确，无 U/V 错位、绿紫偏色、行错位或拉伸；场景显示器高光过曝在两目一致，非转换异常。Step 7 全部门禁通过。
 
 ## 2026-07-14：项目协作说明维护
 

@@ -299,3 +299,7 @@ cmake --install stream-server/build/Debug
 
 - 独立 RGA probe 已实现，Debug 交叉构建、install、直接依赖/RPATH 检查和 `git diff --check` 均通过；安装包包含 `librga.so`。
 - 首次自动部署尝试失败于 `ssh: connect to host 192.168.5.9 port 22: Connection refused`，尚无板端 RGA 能力、性能或画面结论。
+- 板端首次 300 帧运行已通过：capture `30.07fps`、sequence gap 0，VDEC+RGA `30.10fps`；send/get/RGA/pipeline avg 为 `0.169/19.932/1.229/21.401ms`，pipeline max `46.818ms`，VDEC 错误计数全 0并正常释放资源。
+- 首帧输出为 NV12 `1280x480`，stride 1280，block/packed 均为 921600 bytes。仍需两次重复运行和人工画面确认，Step 7 尚未最终验收。
+- 后续两次 300 帧重复运行均以退出码 0 完成，最终 `30.05/30.03fps`、sequence gap 0，RGA avg `1.236/1.234ms`、pipeline avg `21.861/21.807ms`，错误计数全 0且资源正常释放。
+- repeat2 NV12 已拉回本机确认实际大小 921600 bytes，并转换为 PNG 检查；左右目、拼接、亮度和色彩正常，无 chroma plane 错位或几何异常。三次运行和画面门禁全部通过，Step 7 验收完成。
