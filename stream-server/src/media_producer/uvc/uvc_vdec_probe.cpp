@@ -7,6 +7,7 @@
 #include "rk_mpi_mb.h"
 #include "rk_mpi_sys.h"
 #include "rk_mpi_vdec.h"
+#include "librga/im2d.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -29,6 +30,7 @@ namespace {
         std::string output = "/tmp/uvc_vdec_first.yuv";
         uint32_t frames = 300;
         uint32_t timeout_ms = 1000;
+        bool convert_nv12 = false;
     };
 
     struct InputFrameHolder {
@@ -41,7 +43,8 @@ namespace {
     }
 
     void PrintUsage(const char *program) {
-        std::printf("Usage: %s [--device /dev/videoX] [--frames N] [--output FILE] [--timeout-ms N]\n",
+        std::printf("Usage: %s [--device /dev/videoX] [--frames N] [--output FILE] [--timeout-ms N] "
+                    "[--convert-nv12]\n",
                     program);
     }
 
@@ -83,6 +86,8 @@ namespace {
                     std::fprintf(stderr, "Invalid timeout\n");
                     return false;
                 }
+            } else if (argument == "--convert-nv12") {
+                options->convert_nv12 = true;
             } else {
                 std::fprintf(stderr, "Unknown argument: %s\n", argument.c_str());
                 return false;
@@ -109,6 +114,10 @@ namespace {
                 return false;
             }
             mpi_initialized_ = true;
+
+            if (options_.convert_nv12 && !InitNv12Pool()) {
+                return false;
+            }
 
             VDEC_PIC_BUF_ATTR_S picture{};
             picture.enCodecType = RK_VIDEO_ID_MJPEG;
@@ -215,9 +224,13 @@ namespace {
             }
 
             bool valid = ValidateOutput(output);
-            if (valid && decoded_frames_ == 0) {
+            double convert_ms = 0.0;
+            if (valid && options_.convert_nv12) {
+                valid = ConvertToNv12(output, decoded_frames_ == 0, &convert_ms);
+            } else if (valid && decoded_frames_ == 0) {
                 valid = WriteFirstFrame(output);
             }
+            const auto processing_finished = std::chrono::steady_clock::now();
             const RK_S32 release_result = RK_MPI_VDEC_ReleaseFrame(channel_, &output);
             if (release_result != RK_SUCCESS) {
                 LOG_ERROR("RK_MPI_VDEC_ReleaseFrame failed: {:#x}", release_result);
@@ -232,19 +245,21 @@ namespace {
             const double get_ms =
                     std::chrono::duration<double, std::milli>(get_finished - get_started).count();
             const double total_ms =
-                    std::chrono::duration<double, std::milli>(get_finished - frame_started).count();
+                    std::chrono::duration<double, std::milli>(processing_finished - frame_started).count();
             send_time_ms_ += send_ms;
             max_send_time_ms_ = std::max(max_send_time_ms_, send_ms);
             get_time_ms_ += get_ms;
             max_get_time_ms_ = std::max(max_get_time_ms_, get_ms);
+            convert_time_ms_ += convert_ms;
+            max_convert_time_ms_ = std::max(max_convert_time_ms_, convert_ms);
             total_time_ms_ += total_ms;
             max_total_time_ms_ = std::max(max_total_time_ms_, total_ms);
 
             ++decoded_frames_;
             if (decoded_frames_ == 1) {
-                statistics_started_ = get_finished;
+                statistics_started_ = processing_finished;
             } else if (decoded_frames_ % 100 == 0) {
-                LogStatistics(get_finished);
+                LogStatistics(processing_finished);
             }
             return true;
         }
@@ -284,6 +299,13 @@ namespace {
                 }
                 channel_created_ = false;
             }
+            if (nv12_pool_ != MB_INVALID_POOLID) {
+                const RK_S32 result = RK_MPI_MB_DestroyPool(nv12_pool_);
+                if (result != RK_SUCCESS) {
+                    LOG_WARN("RK_MPI_MB_DestroyPool failed: {:#x}", result);
+                }
+                nv12_pool_ = MB_INVALID_POOLID;
+            }
             if (mpi_initialized_) {
                 RK_MPI_SYS_Exit();
                 mpi_initialized_ = false;
@@ -291,6 +313,35 @@ namespace {
         }
 
     private:
+        bool InitNv12Pool() {
+            PIC_BUF_ATTR_S picture{};
+            picture.u32Width = width_;
+            picture.u32Height = height_;
+            picture.enPixelFormat = RK_FMT_YUV420SP;
+            picture.enCompMode = COMPRESS_MODE_NONE;
+            const RK_S32 result = RK_MPI_CAL_COMM_GetPicBufferSize(&picture, &nv12_layout_);
+            if (result != RK_SUCCESS) {
+                LOG_ERROR("RK_MPI_CAL_COMM_GetPicBufferSize(NV12) failed: {:#x}", result);
+                return false;
+            }
+
+            MB_POOL_CONFIG_S pool_config{};
+            pool_config.u64MBSize = nv12_layout_.u32MBSize;
+            pool_config.u32MBCnt = 1;
+            pool_config.enRemapMode = MB_REMAP_MODE_CACHED;
+            pool_config.enAllocType = MB_ALLOC_TYPE_DMA;
+            pool_config.enDmaType = MB_DMA_TYPE_CMA;
+            pool_config.bPreAlloc = RK_TRUE;
+            nv12_pool_ = RK_MPI_MB_CreatePool(&pool_config);
+            if (nv12_pool_ == MB_INVALID_POOLID) {
+                LOG_ERROR("RK_MPI_MB_CreatePool failed for NV12 conversion buffer");
+                return false;
+            }
+            LOG_INFO("RGA NV12 conversion pool initialized: virtual={}x{}, buffer={} bytes",
+                     nv12_layout_.u32VirWidth, nv12_layout_.u32VirHeight, nv12_layout_.u32MBSize);
+            return true;
+        }
+
         bool ValidateOutput(const VIDEO_FRAME_INFO_S &output) const {
             const auto &frame = output.stVFrame;
             const bool supported_format = frame.enPixelFormat == RK_FMT_YUV420SP ||
@@ -303,6 +354,110 @@ namespace {
                           frame.u32Width, frame.u32Height, frame.u32VirWidth, frame.u32VirHeight);
                 return false;
             }
+            return true;
+        }
+
+        bool ConvertToNv12(const VIDEO_FRAME_INFO_S &output, bool write_frame, double *convert_ms) {
+            const auto &frame = output.stVFrame;
+            if (frame.enPixelFormat != RK_FMT_YUV422P) {
+                LOG_ERROR("RGA conversion probe expected YUV422P VDEC output, got format={}",
+                          static_cast<int>(frame.enPixelFormat));
+                return false;
+            }
+
+            MB_BLK destination = RK_MPI_MB_GetMB(nv12_pool_, nv12_layout_.u32MBSize, RK_TRUE);
+            if (destination == MB_INVALID_HANDLE) {
+                LOG_ERROR("RK_MPI_MB_GetMB failed for NV12 conversion buffer");
+                return false;
+            }
+
+            bool valid = true;
+            const RK_S32 source_fd = RK_MPI_MB_Handle2Fd(frame.pMbBlk);
+            const RK_S32 destination_fd = RK_MPI_MB_Handle2Fd(destination);
+            if (source_fd < 0 || destination_fd < 0) {
+                LOG_ERROR("Failed to obtain RGA DMA fd: source={}, destination={}", source_fd, destination_fd);
+                valid = false;
+            }
+
+            const auto started = std::chrono::steady_clock::now();
+            if (valid) {
+                rga_buffer_t source = wrapbuffer_fd(source_fd, frame.u32Width, frame.u32Height,
+                                                    RK_FORMAT_YCbCr_422_P,
+                                                    static_cast<int>(frame.u32VirWidth),
+                                                    static_cast<int>(frame.u32VirHeight));
+                rga_buffer_t target = wrapbuffer_fd(destination_fd, width_, height_,
+                                                    RK_FORMAT_YCbCr_420_SP,
+                                                    static_cast<int>(nv12_layout_.u32VirWidth),
+                                                    static_cast<int>(nv12_layout_.u32VirHeight));
+                im_rect source_rect{};
+                im_rect target_rect{};
+                IM_STATUS status = imcheck(source, target, source_rect, target_rect);
+                if (status != IM_STATUS_NOERROR) {
+                    LOG_ERROR("RGA YUV422P-to-NV12 check failed: {} ({})", imStrError(status),
+                              static_cast<int>(status));
+                    valid = false;
+                } else {
+                    status = imcvtcolor(source, target, source.format, target.format);
+                    if (status != IM_STATUS_SUCCESS) {
+                        LOG_ERROR("RGA YUV422P-to-NV12 conversion failed: {} ({})", imStrError(status),
+                                  static_cast<int>(status));
+                        valid = false;
+                    }
+                }
+            }
+            const auto finished = std::chrono::steady_clock::now();
+            *convert_ms = std::chrono::duration<double, std::milli>(finished - started).count();
+
+            if (valid && write_frame) {
+                valid = WriteFirstNv12Frame(destination);
+            }
+            const RK_S32 release_result = RK_MPI_MB_ReleaseMB(destination);
+            if (release_result != RK_SUCCESS) {
+                LOG_ERROR("RK_MPI_MB_ReleaseMB failed for NV12 conversion buffer: {:#x}", release_result);
+                return false;
+            }
+            return valid;
+        }
+
+        bool WriteFirstNv12Frame(MB_BLK block) {
+            const RK_S32 cache_result = RK_MPI_SYS_MmzFlushCache(block, RK_TRUE);
+            if (cache_result != RK_SUCCESS) {
+                LOG_ERROR("Failed to invalidate RGA NV12 output cache: {:#x}", cache_result);
+                return false;
+            }
+            const auto *base = static_cast<const uint8_t *>(RK_MPI_MB_Handle2VirAddr(block));
+            const size_t block_size = RK_MPI_MB_GetSize(block);
+            const size_t stride = RK_MPI_CAL_COMM_GetHorStride(nv12_layout_.u32VirWidth, RK_FMT_YUV420SP);
+            const size_t y_plane_size = stride * nv12_layout_.u32VirHeight;
+            const size_t required_size = y_plane_size + stride * nv12_layout_.u32VirHeight / 2;
+            if (!base || stride < width_ || block_size < required_size) {
+                LOG_ERROR("Invalid RGA NV12 output layout: block={}, stride={}, required={}", block_size,
+                          stride, required_size);
+                return false;
+            }
+
+            FILE *file = std::fopen(options_.output.c_str(), "wb");
+            if (!file) {
+                LOG_ERROR("Failed to open RGA NV12 output '{}': {}", options_.output, std::strerror(errno));
+                return false;
+            }
+            bool write_ok = true;
+            for (uint32_t row = 0; row < height_ && write_ok; ++row) {
+                write_ok = std::fwrite(base + row * stride, 1, width_, file) == width_;
+            }
+            const auto *chroma = base + y_plane_size;
+            for (uint32_t row = 0; row < height_ / 2 && write_ok; ++row) {
+                write_ok = std::fwrite(chroma + row * stride, 1, width_, file) == width_;
+            }
+            const bool close_ok = std::fclose(file) == 0;
+            if (!write_ok || !close_ok) {
+                LOG_ERROR("Failed to write complete RGA NV12 frame to '{}'", options_.output);
+                return false;
+            }
+            LOG_INFO("First RGA output saved to '{}': format=NV12, size={}x{}, virtual={}x{}, stride={}, "
+                     "block={} bytes, packed={} bytes",
+                     options_.output, width_, height_, nv12_layout_.u32VirWidth, nv12_layout_.u32VirHeight,
+                     stride, block_size, static_cast<size_t>(width_) * height_ * 3 / 2);
             return true;
         }
 
@@ -365,11 +520,14 @@ namespace {
 
         void LogStatistics(std::chrono::steady_clock::time_point now) const {
             const double seconds = std::chrono::duration<double>(now - statistics_started_).count();
-            LOG_INFO("MJPEG VDEC: frames={}, fps={:.2f}, send_ms(avg/max)={:.3f}/{:.3f}, "
-                     "get_ms(avg/max)={:.3f}/{:.3f}, total_ms(avg/max)={:.3f}/{:.3f}",
+            LOG_INFO("MJPEG VDEC{}: frames={}, fps={:.2f}, send_ms(avg/max)={:.3f}/{:.3f}, "
+                     "get_ms(avg/max)={:.3f}/{:.3f}, rga_ms(avg/max)={:.3f}/{:.3f}, "
+                     "pipeline_ms(avg/max)={:.3f}/{:.3f}",
+                     options_.convert_nv12 ? "+RGA" : "",
                      decoded_frames_, seconds > 0.0 && decoded_frames_ > 1 ? (decoded_frames_ - 1) / seconds : 0.0,
                      send_time_ms_ / decoded_frames_, max_send_time_ms_, get_time_ms_ / decoded_frames_,
-                     max_get_time_ms_, total_time_ms_ / decoded_frames_, max_total_time_ms_);
+                     max_get_time_ms_, convert_time_ms_ / decoded_frames_, max_convert_time_ms_,
+                     total_time_ms_ / decoded_frames_, max_total_time_ms_);
         }
 
         const Options &options_;
@@ -379,11 +537,15 @@ namespace {
         bool mpi_initialized_ = false;
         bool channel_created_ = false;
         bool receiving_ = false;
+        MB_POOL nv12_pool_ = MB_INVALID_POOLID;
+        MB_PIC_CAL_S nv12_layout_{};
         uint32_t decoded_frames_ = 0;
         double send_time_ms_ = 0.0;
         double max_send_time_ms_ = 0.0;
         double get_time_ms_ = 0.0;
         double max_get_time_ms_ = 0.0;
+        double convert_time_ms_ = 0.0;
+        double max_convert_time_ms_ = 0.0;
         double total_time_ms_ = 0.0;
         double max_total_time_ms_ = 0.0;
         std::chrono::steady_clock::time_point statistics_started_;

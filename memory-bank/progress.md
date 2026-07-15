@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-- 当前实施状态：双目 UVC Step 1、Step 3、Step 4、Step 5、Step 6 均已通过板端验收；下一阶段尚未开始。
+- 当前实施状态：双目 UVC Step 1、Step 3、Step 4、Step 5、Step 6 均已通过板端验收；Step 7 RGA YUV422P -> NV12 独立 probe 实施中。
 - Step 1 已通过 Luckfox 板端实机验收。
 - Step 2 已按用户要求取消，相关未交付代码已撤销。
 - Step 3 已于 2026-07-13 由用户确认验收通过。
@@ -86,6 +86,14 @@
 - 随后两次重复运行均完整完成 300 帧：repeat1/repeat2 最终 VDEC 为 `29.96/29.85fps`，total avg/max 分别为 `24.719/56.001ms` 与 `24.576/84.954ms`，capture sequence gaps 为 0/1；两次格式、尺寸、stride、文件大小和零错误状态均一致，正常 stop/release，未发生 USB disconnect。
 - 用户已确认 YUV422P 画面方向、亮度和色彩正常。Step 6 的性能、三次连续运行、生命周期、输出格式和人工画面验收全部通过。
 - 下一阶段候选为独立验证 YUV422P -> NV12 硬件转换能力和端到端帧预算；尚未开始，不直接修改正式 `UvcH264Producer`，也不在没有 probe 数据时选择 RGA/VPSS 或 bind/zero-copy 方案。
+
+## 2026-07-15：Step 7 帧率优化阶段 4——RGA YUV422P 转 NV12 独立 probe
+
+- 当前目标：在 Step 6 probe 内以显式模式验证 RGA DMA fd 转换，记录 VDEC、RGA 和端到端耗时，保存 packed NV12 首帧。
+- 设计选择：先只验证 RGA，不并行实现 VPSS；RGA 不支持 planar YUV422P 时明确失败并以实机错误作为下一方案依据。
+- 边界：不修改正式 `UvcH264Producer`、VENC、distribution 或 HTTP；板端通过前不接入正式数据流。
+- 当前状态：独立 RGA probe 已实现并通过 Debug 交叉构建；安装包显式携带新增的直接依赖 `librga.so`，等待板端验收。
+- 部署尝试：固定地址 `root@192.168.5.9` 的 SSH 端口拒绝连接，未修改板端文件；连接恢复后从部署和 300 帧 probe 继续。
 
 ## 2026-07-14：项目协作说明维护
 

@@ -11,6 +11,7 @@
 - JPEG 解码与像素转换：工程现有 FFmpeg `libavcodec` + `libswscale`。
 - H.264 编码：RV1106 RKMPI VENC，NV12 input MB pool。
 - 硬件 MJPEG 能力探测：RKMPI VDEC `VIDEO_MODE_FRAME`、`RK_VIDEO_ID_MJPEG`，请求 `RK_FMT_YUV420SP` 但必须按 decoded frame 的实际 pixel format 验证和保存；该相机首个实测输出为 `RK_FMT_YUV422P`。SDK 的 VDEC 符号来自 `librockit_full.so`，仅 probe 链接并随安装包部署该库。
+- 硬件像素格式转换探测：librga im2d `imcheck` + `imcvtcolor`，输入 `RK_FORMAT_YCbCr_422_P`、输出 `RK_FORMAT_YCbCr_420_SP`，通过 RKMPI MB DMA fd 传递；当前仅用于 Step 7 独立 probe。
 
 ## 选择理由
 

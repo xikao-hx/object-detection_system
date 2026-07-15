@@ -252,3 +252,50 @@ cmake --install stream-server/build/Debug
 - 用户确认 packed YUV422P 画面的左右拼接方向、亮度和色彩正常。
 - 性能、三次连续运行、生命周期、格式/文件大小、错误状态和人工画面检查全部通过；Step 6 验收完成。
 - 该结果只证明 `MJPEG -> VDEC YUV422P` 能接近 30fps，不证明 `YUV422P -> NV12 -> VENC` 已满足 30fps；正式 producer 保持 software decoder，后续转换方案必须另立步骤验证。
+
+## Step 7：帧率优化阶段 4——RGA YUV422P 转 NV12 独立 probe
+
+### 目标和成功标准
+
+- 在现有 `uvc_vdec_probe` 中增加显式 `--convert-nv12` 模式，复用 Step 6 的真实 UVC MJPEG 与 RKMPI VDEC 生命周期。
+- 当 VDEC 实际输出 `RK_FMT_YUV422P` 时，通过 RGA DMA fd 路径同步转换为 `RK_FMT_YUV420SP`；输出 MB 的 size/stride/virtual size 必须由 CAL API 计算。
+- 每 100 帧同时记录 send/get、RGA convert 和 `VDEC + RGA` 端到端 avg/max 与实际 fps；连续 300 帧目标为接近输入 30fps且不持续积压。
+- 首帧按 NV12 实际 stride 去除 padding 后保存，packed 文件应为 `1280 * 480 * 3 / 2 = 921600` bytes，并由用户人工确认方向、亮度和色彩。
+- RGA 格式检查、转换、MB 获取、cache invalidate、输出布局或写入任一失败都返回非零；不使用 software fallback 掩盖硬件不支持。
+
+### 修改文件
+
+- `media_producer/uvc/uvc_vdec_probe.cpp`：新增可选 RGA 转换、NV12 MB pool、统计和首帧输出。
+- `stream-server/CMakeLists.txt`：安装 probe 新增的直接运行依赖 `librga.so`。
+- `memory-bank/*.md`：记录 Step 7 的职责边界、方案和验收结果。
+
+### 禁止修改范围
+
+- 不修改正式 `UvcH264Producer`、software decoder、VENC 或 mailbox。
+- 不接入 dispatcher、distribution、HTTP、Web UI，也不实现 VDEC -> VENC bind/zero-copy。
+- 不同时实现 RGA 和 VPSS；若实机证明 RGA 不支持该 planar YUV422P，再基于错误另立 VPSS 验证步骤。
+
+### 验证
+
+```bash
+git diff --check
+cmake --build stream-server/build/Debug
+cmake --install stream-server/build/Debug
+```
+
+板端停止 `aipc` 后运行：
+
+```bash
+/root/aipc/bin/uvc_vdec_probe \
+  --device /dev/video0 \
+  --frames 300 \
+  --convert-nv12 \
+  --output /tmp/uvc_vdec_rga_first.nv12
+```
+
+用户确认连续性能、重复启停和 NV12 画面前，不将硬件链路并入正式 producer。
+
+### 当前结果
+
+- 独立 RGA probe 已实现，Debug 交叉构建、install、直接依赖/RPATH 检查和 `git diff --check` 均通过；安装包包含 `librga.so`。
+- 首次自动部署尝试失败于 `ssh: connect to host 192.168.5.9 port 22: Connection refused`，尚无板端 RGA 能力、性能或画面结论。

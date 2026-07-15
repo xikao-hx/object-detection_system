@@ -31,6 +31,7 @@ Step 1 UVC： /dev/videoX -> V4L2 mmap -> owned MJPEG UvcFrame -> typed callback
 Step 3 UVC： UvcFrame -> MJPEG decode -> NV12 -> RKMPI VENC H.264 -> existing consumers
 Step 5 UVC： capture thread -> latest-frame mailbox(1) -> processing thread -> decode/NV12/VENC -> existing consumers
 Step 6 probe： /dev/videoX -> UvcProducer owned MJPEG -> RKMPI VDEC -> validate/save actual NV12 or YUV422P
+Step 7 probe： /dev/videoX -> UvcProducer owned MJPEG -> RKMPI VDEC YUV422P -> RGA -> NV12 MB -> validate/save
 ```
 
 ## 新增洞察
@@ -45,3 +46,4 @@ Step 6 probe： /dev/videoX -> UvcProducer owned MJPEG -> RKMPI VDEC -> validate
 - Step 5 的容量 1 mailbox 和 processing thread 均由 `UvcH264Producer` 私有拥有；`UvcProducer` 仍只提供 owned MJPEG callback，dispatcher 仍只消费 H.264。过载时替换 pending 旧帧，不允许跨层积压或 drain 历史帧。
 - Step 6 的 VDEC 是独立诊断 target，固定独占 channel 0 并要求正式服务停止后运行；它不改变 `MediaManager`、正式 producer 或 distribution 的依赖和所有权。该步骤已完成板端验收，正式替换前仍需独立证明 YUV422P -> NV12 转换后的端到端帧预算。
 - VDEC decoded frame 的 pixel format 必须以每帧 `VIDEO_FRAME_INFO_S` 为准；请求 NV12 不代表 JPEG hardware decoder 必然执行 chroma resampling。该相机实测返回 YUV422P，后续格式转换仍应位于 producer 内部硬件处理边界，不能下沉到通用 UVC capture 或上浮到 distribution。
+- Step 7 仍是同一独立诊断 target 的显式模式：RGA 只通过 decoded/output MB 的 DMA fd 工作，NV12 pool 由 probe 私有拥有；它不改变正式 producer 或 distribution 的所有权。若验证通过，后续正式设计可在 producer 内部复用该硬件边界，但不能直接把 probe 生命周期变成公共 service。

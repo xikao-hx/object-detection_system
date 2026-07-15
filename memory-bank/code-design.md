@@ -322,3 +322,43 @@ stop: reject frames -> stop/join capture -> clear/wake/join processing -> stop d
 - 两次追加重复运行同样完成 300 帧并保持约 30fps、零 VDEC 错误、格式/大小一致和正常资源释放；三次运行门禁通过。
 - 用户已确认 packed YUV422P 画面方向、亮度和色彩正常；Step 6 全部门禁通过。
 - 本步不把 VDEC probe 代码并入正式 producer。后续若推进，先独立测量 YUV422P -> NV12 转换耗时和输出正确性，再决定正式 decoder 的局部替换设计。
+
+# Step 7 代码设计：RGA YUV422P 转 NV12 独立 probe
+
+## 成功标准
+
+- 仅在显式 `--convert-nv12` 下启用，Step 6 原始输出检查模式保持兼容。
+- 使用 `RK_MPI_CAL_COMM_GetPicBufferSize` 得到 NV12 MB size/virtual size，以私有 DMA pool 提供目标 buffer。
+- VDEC 的 YUV422P MB fd 包装为 `RK_FORMAT_YCbCr_422_P`，目标 fd 包装为 `RK_FORMAT_YCbCr_420_SP`；先 `imcheck` 再同步 `imcvtcolor`。
+- 每帧转换后及时释放目标 MB 和 VDEC frame；首帧在 cache invalidate 后按 stride 保存 packed NV12。
+- 日志分别包含 VDEC send/get、RGA convert 和 pipeline total avg/max，不以输出 fps 单独掩盖阶段耗时。
+
+## 数据流与所有权
+
+```text
+owned MJPEG -> external input MB -> VDEC YUV422P MB (VDEC owns)
+  -> source DMA fd -> RGA -> private NV12 MB (probe owns)
+  -> validate/save/release NV12 MB -> release VDEC frame
+```
+
+- 初始化顺序：SYS -> NV12 CAL/pool（转换模式）-> VDEC channel -> recv；清理严格逆序。
+- 允许依赖：现有 probe 依赖加 librga im2d header/API；target 链接 `rga`，安装包显式携带其新增的直接依赖 `librga.so`。
+- 禁止依赖：正式 `UvcH264Producer`、VENC、MediaManager、distribution 和 HTTP。
+
+## 风险与处理
+
+- planar YUV422P 支持取决于板端 RGA 驱动/库组合：`imcheck` 或 `imcvtcolor` 失败即终止并输出错误字符串，不做 software fallback。
+- stride/virtual height 不可假设等于 visible size：source 使用 VDEC frame 实际值，destination 使用 CAL 结果。
+- RGA 写后 CPU 读取首帧前执行 cache invalidate；目标 MB 始终在 VDEC frame 释放前完成同步转换。
+
+## 验收门禁
+
+- 自动：Debug 交叉构建、install、`git diff --check`。
+- 板端：300 帧接近 30fps、输出 921600 bytes、人工画面正常，并至少重复运行 3 次验证资源释放。
+- 验收前不修改正式 producer；验收后才设计 VDEC/RGA/VENC 的生产化生命周期和错误传播。
+
+## 当前实施结果
+
+- `--convert-nv12`、CAL 布局、私有 DMA pool、RGA `imcheck/imcvtcolor`、packed NV12 保存和分阶段统计已实现。
+- Debug 交叉构建无告警，install 与 `git diff --check` 通过；ELF 直接依赖包含 `librga.so`，RPATH 为 `$ORIGIN/../lib`，安装包已携带该库。
+- 固定板端 SSH 当前返回 connection refused，实机能力与性能门禁尚未执行。

@@ -177,7 +177,9 @@ install(TARGETS aipc uvc_capture_test uvc_vdec_probe
 )
 
 # uvc_vdec_probe 使用仅由完整 Rockit 库导出的 VDEC API；板端基础镜像通常只预装精简版。
-install(FILES ${LUCKFOX_MPI_LIB_DIR}/librockit_full.so
+install(FILES
+    ${LUCKFOX_MPI_LIB_DIR}/librockit_full.so
+    ${LUCKFOX_MPI_LIB_DIR}/librga.so
     DESTINATION ${AIPC_INSTALL_LIB_DIR}
 )
 

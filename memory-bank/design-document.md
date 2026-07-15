@@ -28,6 +28,7 @@
 - 统计确认后再用容量 1~2 的 latest-frame queue 解耦采集与转码；队列满时丢旧帧，禁止积累历史延迟。
 - RKMPI MJPEG VDEC 必须先由独立板端 probe 验证，再替换正式 producer；无实机证据时不提前实现 zero-copy 或 VDEC -> VENC bind。
 - 首次真实 probe 已证明 VDEC 能解码该相机 MJPEG，但尽管请求 NV12，实际返回 `RK_FMT_YUV422P`（format 7、`1280x480`、MB 1228800 bytes）；probe 必须保留并报告真实格式，后续是否用 RGA/VPSS 转 NV12 需另立步骤验证。
+- Step 7 优先验证现有链接依赖 librga：以 decoded YUV422P MB 和独立 NV12 MB 的 DMA fd 做同步 `imcvtcolor`，分别测量转换与端到端预算。该 probe 通过前不修改正式 producer；失败时保留原始 RGA 错误，不自动退回软件转换或同时引入 VPSS。
 
 ## 功能设计
 
