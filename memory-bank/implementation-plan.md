@@ -303,3 +303,42 @@ cmake --install stream-server/build/Debug
 - 首帧输出为 NV12 `1280x480`，stride 1280，block/packed 均为 921600 bytes。仍需两次重复运行和人工画面确认，Step 7 尚未最终验收。
 - 后续两次 300 帧重复运行均以退出码 0 完成，最终 `30.05/30.03fps`、sequence gap 0，RGA avg `1.236/1.234ms`、pipeline avg `21.861/21.807ms`，错误计数全 0且资源正常释放。
 - repeat2 NV12 已拉回本机确认实际大小 921600 bytes，并转换为 PNG 检查；左右目、拼接、亮度和色彩正常，无 chroma plane 错位或几何异常。三次运行和画面门禁全部通过，Step 7 验收完成。
+
+## Step 8：帧率优化阶段 5——正式 VDEC/RGA/VENC 接入
+
+### 目标和成功标准
+
+- 抽取 UVC 私有共享硬件组件，由 probe 和正式 `UvcH264Producer` 共用 VDEC 与 RGA 生命周期，禁止复制 Step 7 实现。
+- 正式 UVC 路径替换为 `MJPEG -> VDEC YUV422P -> RGA NV12 -> VENC H.264`，保留容量 1 latest-frame mailbox、dispatcher、consumer 和 distribution 边界。
+- 正式输出接近 30fps；至少运行 500 capture 帧，sequence gap 0、mailbox 不积压、VDEC/RGA/VENC 错误为 0，并验证 RTSP、WebSocket Preview、WebRTC 与 HTTP 状态兼容。
+- 启动、停止和至少一次重复启停均正常释放 VDEC、VENC、MB pool、processing thread 和 capture 资源。
+
+### 修改文件
+
+- `media_producer/uvc/uvc_hardware_pipeline.*`：共享 VDEC decoded frame 与 RGA NV12 frame 的 move-only 所有权、硬件生命周期和阶段计时。
+- `media_producer/uvc/uvc_vdec_probe.cpp`：改用共享组件，保留 Step 6/7 CLI 与输出行为。
+- `media_producer/uvc/uvc_h264_producer.cpp`：移除 FFmpeg/swscale 热路径并组合共享硬件组件与既有 VENC。
+- 相关 CMake：保留 SimpleIPC/File 的精简 `rockit` `DT_NEEDED`，安装 `rockit_full` 但仅由 UVC 硬件组件在初始化时按需加载 VDEC/CAL/SYS/MB API；移除 UVC producer 不再需要的 FFmpeg 直接依赖。
+- `memory-bank/*.md`：记录边界、验证和结果。
+
+### 禁止修改范围
+
+- 不修改 `UvcProducer`、mailbox 策略、VENC 参数、dispatcher、distribution、HTTP、Web UI 或客户端。
+- 不实现 VDEC -> VENC bind、zero-copy、自动软件 fallback、USB 重连或掉线状态传播；这些必须基于正式链路结果另立步骤。
+- 不把 probe 生命周期直接复制到 producer，也不让共享硬件组件依赖 `MediaManager` 或 distribution。
+
+### 验证
+
+```bash
+git diff --check
+cmake --build stream-server/build/Debug
+cmake --install stream-server/build/Debug
+```
+
+板端以 `start_app.sh --mode uvc` 验证至少 500 帧、三种输出、HTTP 状态和重复启停。当前步骤验收前不进入后续健壮性优化。
+
+### 当前结果
+
+- 否决统一 full 或双库 `DT_NEEDED` 方案；最终 `aipc` ELF 仅依赖 compact `librockit.so`，UVC 初始化时通过 `dlopen`/`dlsym` 加载隔离的 full VDEC runtime，SimpleIPC 路径不会装载 full。
+- 共享 probe 最终 300 帧：capture `30.07fps`、pipeline `30.07fps`、sequence gap 0、VDEC/RGA 错误 0，VDEC get avg `19.810ms`、RGA avg `1.227ms`、pipeline avg `21.368ms`，NV12 为准确的 921600 bytes。
+- 正式 UVC 长稳运行到 4144 个 H.264 output：capture 约 `30.06fps`、H.264 output `29.87fps`，sequence gap 0、decode/send error 0、mailbox depth 最大 1；RTSP 为 H.264 `1280x480@30fps`，三个 HTTP 状态接口返回 200，SIGTERM 全资源清理和两次重复启动通过。Step 8 验收完成。

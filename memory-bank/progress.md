@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-- 当前实施状态：双目 UVC Step 1、Step 3、Step 4、Step 5、Step 6、Step 7 均已通过板端验收。
+- 当前实施状态：双目 UVC Step 1、Step 3、Step 4、Step 5、Step 6、Step 7、Step 8 均已通过板端验收。
 - Step 1 已通过 Luckfox 板端实机验收。
 - Step 2 已按用户要求取消，相关未交付代码已撤销。
 - Step 3 已于 2026-07-13 由用户确认验收通过。
@@ -98,6 +98,17 @@
 - 输出 NV12 为 `1280x480`、stride 1280、block/packed 921600 bytes。首次性能和文件布局门禁通过；等待两次重复运行及用户人工确认画面后再完成 Step 7。
 - Codex 通过固定板端 SSH 独立完成后续两次 300 帧运行，远程退出码均为 0：repeat1/repeat2 最终 `30.05/30.03fps`，capture `30.03/30.02fps`，sequence gap 均为 0；RGA avg/max 为 `1.236/2.106ms` 与 `1.234/2.189ms`，pipeline avg/max 为 `21.861/73.228ms` 与 `21.807/61.188ms`，VDEC 错误计数全 0并正常释放。
 - repeat2 NV12 已拉回本机，实际大小 921600 bytes，并以 `nv12 1280x480` 转为 PNG 检查：左右目完整且拼接边界正确，无 U/V 错位、绿紫偏色、行错位或拉伸；场景显示器高光过曝在两目一致，非转换异常。Step 7 全部门禁通过。
+
+## 2026-07-15：Step 8 帧率优化阶段 5——正式 VDEC/RGA/VENC 接入
+
+- 当前目标：抽取 probe/producer 共用的 UVC 硬件组件，以最小边界替换正式 FFmpeg/swscale 热路径。
+- 保持范围：latest-frame mailbox、VENC 配置、dispatcher、distribution 和 HTTP 均不改变；不顺带处理 USB 重连或失败传播。
+- 当前状态：代码、交叉构建、安装和板端验收完成。
+- 正式 UVC 硬件链路首次板端运行超过 1300 帧：capture `30.06fps`、H.264 output `29.94fps`，sequence gap 0，VDEC/RGA/VENC 错误 0，pipeline avg 约 `21.84ms`；RTSP H.264 `1280x480`、三个 HTTP 状态接口和一次停止/重复启动通过。
+- 全进程改用 `rockit_full` 时 SimpleIPC 在 RKAIQ 初始化后退出；即使同时链接 compact/full 并调整加载顺序，两种模式仍无法可靠启动。最终 `aipc` ELF 只保留 `librockit.so` 的 `DT_NEEDED`，full runtime 仅在 UVC decoder 初始化时动态加载，SimpleIPC 路径不装载 full；本板无可用 MIPI sensor，SimpleIPC 可验证到既有 producer 初始化边界，不能验证实际 MIPI 出流。
+- probe 已迁移到正式共享组件并再次完成 300 帧：capture/pipeline `30.07fps`、sequence gap 0，VDEC get avg `19.810ms`、RGA avg `1.227ms`、pipeline avg `21.368ms`、错误 0，输出 NV12 921600 bytes。
+- 最终正式链路长稳运行到 4144 个 H.264 output：capture 约 `30.06fps`，H.264 output `29.87fps`，VDEC avg 约 `20.35ms`、RGA avg `1.227ms`、pipeline avg `22.07ms`，sequence gap 0、decode/send error 0，mailbox 最大深度 1。最终二次部署后的首个 100 帧为 `29.98fps`、mailbox drop 0。
+- `/api/status`、`/api/ai/status`、`/api/pipeline/status` 均返回 200 和既有 JSON；RTSP probe 为 H.264 `1280x480@30fps`；SIGTERM 后 capture、processing、dispatcher、VENC、VDEC/SYS、HTTP 和 distribution 全部清理并记录 `Application Terminated`，两次重复启动通过。Step 8 验收完成。
 
 ## 2026-07-14：项目协作说明维护
 

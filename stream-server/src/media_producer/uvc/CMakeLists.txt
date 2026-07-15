@@ -18,29 +18,18 @@ target_link_libraries(uvc_lib
 
 target_compile_options(uvc_lib PRIVATE -Wall -Wextra)
 
-set(UVC_FFMPEG_LIBS
-    avcodec
-    swresample
-    avutil
-    swscale
+add_library(uvc_hardware_lib STATIC
+    uvc_hardware_pipeline.cpp
+    uvc_hardware_pipeline.h
 )
-
-set(UVC_FFMPEG_SYS_DEPS
-    iconv
-    gnutls
-    tasn1
-    hogweed
-    nettle
-    gmp
-    unistring
-    intl
-    bz2
-    drm
-    lzma
-    z
-    atomic
-    m
+target_include_directories(uvc_hardware_lib PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/src
+    ${LUCKFOX_MPI_INCLUDE_DIR}
 )
+target_link_directories(uvc_hardware_lib PUBLIC ${LUCKFOX_MPI_LIB_DIR})
+target_link_libraries(uvc_hardware_lib PUBLIC uvc_lib common rockit rockchip_mpp drm rga dl)
+target_compile_options(uvc_hardware_lib PRIVATE -Wall -Wextra)
 
 add_library(uvc_h264_lib STATIC
     uvc_h264_producer.cpp
@@ -65,11 +54,8 @@ target_link_directories(uvc_h264_lib
 target_link_libraries(uvc_h264_lib
     PUBLIC
         uvc_lib
+        uvc_hardware_lib
         common
-        ${UVC_FFMPEG_LIBS}
-        ${UVC_FFMPEG_SYS_DEPS}
-        rockit
-        rockchip_mpp
     PRIVATE
         spdlog::spdlog
 )
@@ -92,10 +78,7 @@ target_link_directories(uvc_vdec_probe PRIVATE
 )
 target_link_libraries(uvc_vdec_probe PRIVATE
     uvc_lib
-    rockit_full
-    rockchip_mpp
-    drm
-    rga
+    uvc_hardware_lib
 )
 target_compile_options(uvc_vdec_probe PRIVATE -Wall -Wextra)
 set_target_properties(uvc_vdec_probe PROPERTIES

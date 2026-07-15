@@ -366,3 +366,34 @@ owned MJPEG -> external input MB -> VDEC YUV422P MB (VDEC owns)
 - 当前只完成首次性能与布局验证；两次重复运行和画面方向/亮度/色彩人工确认仍是最终验收门禁。
 - 两次追加运行均返回 0并保持约 30fps、sequence gap 0、RGA avg 约 `1.23ms`、pipeline avg 约 `21.8ms`、零 VDEC 错误和正常释放；三次运行门禁通过。
 - 拉回的 repeat2 NV12 为准确的 921600 bytes；按 NV12 `1280x480` 转图后，双目水平拼接、亮度和色彩正常，无 plane/stride/几何异常。Step 7 验收完成，可进入正式 VDEC/RGA/VENC 生产化设计，但不得直接复制 probe 生命周期。
+
+# Step 8 代码设计：正式 VDEC/RGA/VENC 接入
+
+## 成功标准与职责
+
+- `uvc_hardware_pipeline.*` 提供两个窄职责：按需加载并管理 full VDEC runtime/输出 frame 的 RAII release，以及 RGA NV12 MB 的 RAII release；调用方继续持有 compact `RK_MPI_SYS` 顶层生命周期供 VENC/RGA 使用。
+- probe 保持原 CLI/文件输出；正式 producer 保持 mailbox、VENC frame metadata、dispatcher 和 consumer 语义。
+- 正式统计改为 VDEC send/get、RGA、VENC send 和 pipeline total，仍每 100 个成功 VENC input 汇总。
+
+## 数据流与所有权
+
+```text
+UvcFramePtr -> external MB(retain input) -> VDEC frame(move-only)
+  -> RGA output MB(move-only) -> VENC SendFrame -> release caller MB ref
+```
+
+- `UvcH264Producer` 初始化：compact SYS -> shared full SYS/VDEC + RGA -> compact VENC；清理为 VENC -> shared hardware -> compact SYS。
+- VDEC frame 必须在同步 RGA 完成后释放；NV12 MB 必须在 `VENC_SendFrame` 返回后释放调用方引用。
+- RGA 写入是硬件到硬件，不执行 CPU write cache flush；只有 probe CPU 保存时 invalidate。
+
+## 方案取舍与风险
+
+- 不复制 probe：抽取共享组件，probe 也迁移使用，避免两套格式校验和资源清理漂移。
+- 不保留自动 software fallback：同一运行只维护一套 decoder 状态，硬件错误明确计数和记录。
+- 首次尝试让 `aipc` 统一链接 `rockit_full`，实机在 SimpleIPC 进入 RKAIQ 初始化后退出，因此否决。最终保留既有 `rockit` 作为唯一 `DT_NEEDED` 的公共 SYS/VENC/TDE 实现，UVC 组件使用 `dlopen(RTLD_LOCAL)` 和类型化 `dlsym` 按需取得 full 的 VDEC/CAL/SYS/MB API；加载失败或缺符号直接使 UVC 初始化失败，不静默 fallback。
+- 不做 bind/zero-copy：当前 RGA output MB 直接作为 VENC input 已消除 CPU 像素转换，进一步绑定另立步骤。
+
+## 验收门禁
+
+- 自动：无告警交叉构建、install、`aipc` ELF 只出现 `librockit.so` 而不出现 `librockit_full.so` 的 `DT_NEEDED`、`git diff --check`。
+- 板端：正式 UVC 超过 500 帧约 30fps、零硬件错误、RTSP/WS/WebRTC/HTTP、停止与重复启停均通过；共享 probe 追加 300 帧通过。当前板无 MIPI sensor，SimpleIPC 验证到既有 producer 初始化边界，并以 full runtime 未加载作为链接隔离门禁。
