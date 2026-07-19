@@ -1,112 +1,162 @@
-# 检测系统
-# Pyqt界面
-## 页面效果
+# 裂缝检测系统
 
-![main](./vision-client/assets/main-page.png)
+面向裂缝检测场景的视觉与视频采集系统，由 PC 端检测客户端和 Luckfox RV1106 板端推流服务组成：
 
-## 如何使用
-- `python>=3.8`
-- `pip install ultralytics==8.1.0` or `git clone --branch v8.1.0 --single-branch https://github.com/ultralytics/ultralytics.git` `pip install -e .`
-- `pip install pyside6 chardet`
-- `pip install torch==1.12.1+cu113 torchvision==0.13.1+cu113 torchaudio==0.12.1 --extra-index-url https://download.pytorch.org/whl/cu113`
-- `python main.py`
+- `vision-client/`：基于 PySide6 和 Ultralytics YOLO 的桌面客户端。
+- `stream-server/`：运行于 Luckfox/RV1106 的 C++17 推流服务及 Web 控制台。
 
+![桌面客户端](./vision-client/assets/main-page.png)
 
-## 项目功能
-- ✅ 图片推理
-- ✅ 视频推理
-- ✅ 摄像头推理
-- ✅ RTSP 推流
-- ✅ 分类任务推理
-- ✅ 检测任务推理
-- ✅ 分割任务推理
-- ✅ 关键点任务推理
-- ❌ 追踪任务推理
-- ❌ 旋转框任务推理
-- ✅ Pytroch (.pt) 格式模型推理
-- ✅ ONNX (.onnx) 格式模型推理
-- ✅ TensorRT (.engine) 格式模型推理
-- ✅ 模型选择
-- ✅ 置信度/阈值调整
-- ✅ 延迟调整
-- ✅ 保存推理结果
+## 功能概览
 
-## 注意事项
-- 跟踪功能未集成。
-- 旋转框检测未集成。
-- 打包成功可能无法运行。
-- 如果想使用自己的模型，您需要先使用 `ultralytics` 来训练 yolov8 模型，然后将训练好的 `.pt/.onnx/.engine` 文件放入 `models/*` 文件夹。
-- 如果模型是改进的，请将你整个项目文件导入。
-- 如果选择保存结果，结果会保存在 `./run` 路径中。
-- UI 设计文件是 `home.ui`，如果修改它，您需要使用 `pyside6-uic home.ui > ui/home.py` 命令来重新生成 `.py` 文件。
-- 资源文件是 `resources.qrc`，如果您修改了默认图标，需要使用 `pyside6-rcc resources.qrc > ui/resources_rc.py` 命令来重新生成 `.py` 文件。
+### 视觉客户端
 
-# 推流
-基于瑞芯微 RV1106 平台的高性能边缘智能网络摄像头设计，支持 RTSP 推流、WebRTC、mp4 离线录制、WebSocket 网页实时预览
+- 支持图片、视频、摄像头和 RTSP 输入。
+- 支持分类、检测、分割和关键点任务。
+- 支持 PyTorch（`.pt`）、ONNX（`.onnx`）和 TensorRT（`.engine`）模型。
+- 支持模型选择、置信度与阈值调整、推理延迟调整和结果保存。
 
-## 核心功能
+### 推流服务
 
-- 采集与处理
-	- SimpleIPC 模式：硬件链路直通，低开销稳定推流
-- 多路媒体分发
-	- RTSP 实时推流
-	- WebRTC 低延迟预览
-	- WebSocket 网页 H264 预览
-	- MP4 本地离线录制
-- 统一 HTTP API
-	- 设备状态、模式切换、流服务控制、Python 工程管理
+- 支持 SimpleIPC 和 USB UVC 两种采集模式。
+- 支持 RTSP、WebRTC 和 WebSocket H.264 实时预览。
+- 支持 MP4 本地录制。
+- 提供 Web 控制台和 HTTP API，可查询状态并控制采集模式、分辨率及流服务。
+- UVC 双目图像以左右目水平拼接帧传输，拆分与检测由客户端或算法层负责。
 
-## 技术栈
+## 双目图像采集
 
-- C++17 + CMake
-- pybind11 嵌入 Python 3.11
-- cpp-httplib（HTTP API）
-- libdatachannel（WebRTC）
-- spdlog（日志）
-- Rockchip RKMPI（VI/VPSS/VENC）
+当前使用 `HBVCAM-4M2214HD-2 V11` USB 2.0 UVC 双目相机，驱动为 Linux `uvcvideo`。设备节点会随插拔变化，服务默认根据 capture capability、MJPEG 格式、分辨率和帧率自动发现合格的 `/dev/videoX`，不依赖固定节点号。
 
-## 快速开始
+相机输出的是一张左右目水平拼接的 MJPEG 帧，不是两路独立视频。板端不拆分左右目，而是通过以下硬件链路转为 H.264 后交给现有分发服务：
 
-### 1. 编译
+```text
+UVC MJPEG -> V4L2 mmap -> RKMPI VDEC (YUV422P)
+           -> RGA (NV12) -> RKMPI VENC (H.264)
+           -> RTSP / WebRTC / WebSocket Preview / MP4
+```
+
+当前可在 Web 控制台或 `POST /api/pipeline/resolution` 中冷切换三档双目分辨率；切换会重建 capture、VDEC、RGA、VENC 和 dispatcher，并短暂中断视频流。
+
+| 拼接分辨率 | 单目分辨率 | 配置帧率 | 最近一次板端验收：采集 / H.264 输出 |
+| --- | --- | ---: | ---: |
+| `3840x1080` | `1920x1080` | 30 fps | 约 17.66 / 6.99 fps |
+| `2560x720` | `1280x720` | 30 fps | 约 16.64 / 11.40 fps |
+| `1280x480` | `640x480` | 30 fps | 约 15.29 / 15.29 fps |
+
+以上帧率是最近一次三档切换验收的实际采样值，不是能力枚举中的标称值。三档测试的 V4L2 sequence gap 均为 0，未发现 VDEC、RGA 或 VENC send error；RTSP 均报告正确的 H.264 分辨率，页面中的双目画面和切换交互已通过人工验收。单独验收 `1280x480` 硬件链路时曾达到约 30 fps，因此实际帧率仍会受当前分辨率、处理负载和运行条件影响。
+
+原始 MJPEG 能力中，`1280x480` 推荐使用 MJPEG 30 fps；同分辨率 YUYV 仅约 10 fps，不适合作为完整双目 30 fps 的替代方案。更完整的设备能力、供电限制、采集命令和画质排障见[双目相机图像采集开发文档](./doc/开发文档/双目相机图像采集开发文档.md)。
+
+## 视觉客户端
+
+### 环境准备
+
+- Python 3.8 或更高版本。
+- 根据本机 CPU/CUDA 环境安装兼容的 PyTorch。
+
+以下命令提供一套基于 Ultralytics 8.1.0 的安装示例：
 
 ```bash
-# 调用预设的配置 (例如 Debug)
-cmake --preset Debug
+cd vision-client
+python -m venv .venv
+source .venv/bin/activate
+pip install ultralytics==8.1.0 pyside6 chardet
+```
 
-# 使用预设进行构建
+CUDA 11.3 环境可使用：
+
+```bash
+pip install torch==1.12.1+cu113 torchvision==0.13.1+cu113 \
+  torchaudio==0.12.1 --extra-index-url https://download.pytorch.org/whl/cu113
+```
+
+### 启动
+
+客户端依赖相对路径读取模型和资源，应在 `vision-client/` 中运行：
+
+```bash
+cd vision-client
+python main.py
+```
+
+自定义模型按任务放入 `vision-client/models/` 下对应的 `classify/`、`detect/`、`pose/` 或 `segment/` 目录。
+
+## 推流服务
+
+### 配置与构建
+
+首次获取源码时初始化子模块，然后使用项目提供的交叉编译 preset：
+
+```bash
+git submodule update --init --recursive
+cd stream-server
+cmake --preset Debug
 cmake --build --preset Debug
 ```
 
-### 2. 一键部署到板端
+Web 控制台可单独构建：
 
 ```bash
-AIPC_REMOTE_HOST=root@<device_ip> AIPC_REMOTE_DIR=/root/aipc ./assets/install_rsync.sh
+cd stream-server/www
+npm ci
+npm run build
 ```
 
-### 3. 板端启动
+### 部署到 Luckfox
+
+当前板端地址为 `root@192.168.5.9`。部署脚本会构建 Web 控制台、执行 CMake install，并将安装目录同步到 `/root/aipc`：
 
 ```bash
-ssh root@<device_ip>
-cd /root/aipc/bin
-./start_app.sh --daemon
+AIPC_REMOTE_HOST=root@192.168.5.9 \
+AIPC_REMOTE_DIR=/root/aipc \
+stream-server/assets/install_rsync.sh
 ```
 
-### 4. 访问控制台
+### 板端启动
 
-- Web UI: `http://<device_ip>:8080`
-- 健康状态: `http://<device_ip>:8080/api/status`
+```bash
+ssh root@192.168.5.9
 
-## 常用接口
+# USB UVC 双目相机模式；默认自动发现合格设备
+/root/aipc/bin/start_app.sh --mode uvc --daemon
 
-- `POST /api/ai/switch`：切换 AI 模式（`visiong` / `none`）
-- `GET /api/python/projects`：获取 Python 工程列表
-- `POST /api/python/deploy`：部署指定 Python 工程
-- `POST /api/rtsp/start`：启动 RTSP
-- `POST /api/webrtc/start`：启动 WebRTC
+# SimpleIPC 模式
+/root/aipc/bin/start_app.sh --mode simple_ipc --daemon
+```
 
-## 目录参考
+如需显式指定 UVC 节点，可在启动命令前设置 `AIPC_UVC_DEVICE=/dev/videoX`。停止服务使用：
 
-- `src/`：核心 C++ 服务与媒体管线
-- `assets/`：部署脚本
-- `www/`：前端控制台
-- `docs/`：架构与调试文档
+```bash
+/root/aipc/bin/stop_app.sh
+```
+
+### 访问入口
+
+- Web 控制台：`http://192.168.5.9:8080`
+- 系统状态：`GET http://192.168.5.9:8080/api/status`
+- Pipeline 状态：`GET http://192.168.5.9:8080/api/pipeline/status`
+- RTSP：`rtsp://192.168.5.9:554/live/0`
+
+常用控制接口：
+
+- `GET /api/producer/status`、`POST /api/producer/switch`
+- `POST /api/pipeline/resolution`
+- `GET /api/rtsp/status`、`POST /api/rtsp/start`、`POST /api/rtsp/stop`
+- `GET /api/webrtc/status`、`POST /api/webrtc/start`、`POST /api/webrtc/stop`
+- `GET /api/record/status`、`POST /api/record/start`、`POST /api/record/stop`
+
+## 项目目录
+
+```text
+vision-client/          PySide6 + YOLO 桌面客户端
+stream-server/          RV1106 C++ 推流服务
+stream-server/src/      HTTP、媒体生产与媒体分发
+stream-server/www/      Svelte/Vite Web 控制台
+stream-server/assets/   构建、启动和部署脚本
+memory-bank/            当前设计、实施计划、进度和架构记录
+doc/                    开发与技术文档
+camera-information/     USB 双目相机资料
+```
+
+开发约束与 agent 工作规则见 `AGENTS.md`；UVC 采集和图像质量排障见 `doc/开发文档/双目相机图像采集开发文档.md`。
