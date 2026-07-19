@@ -1,8 +1,8 @@
 # 技术栈
 
 ## 选择结果
-- 语言：沿用 `stream-sever/src` 中已有的 C++17 风格项目约定。
-- 构建：沿用 `stream-sever/src` 下已有 CMake 文件。
+- 语言：沿用 `stream-server/src` 中已有的 C++17 风格项目约定。
+- 构建：沿用 `stream-server/src` 下已有 CMake 文件。
 - HTTP：沿用现有 `httplib` 封装。
 - 媒体：沿用现有 RKMPI、libdatachannel、FFmpeg 集成。
 - 文档：使用 `memory-bank/` 下的 markdown 文件。

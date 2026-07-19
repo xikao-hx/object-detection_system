@@ -1,7 +1,7 @@
 # Stream Server 重构 PRD
 
 ## 背景
-- `doc/stream-sever-code-review.md` 指出了 H.264 解析重复、service 回调类型不安全、全局 service 单例死代码、HTTP 路由巨函数，以及若干生命周期/配置问题。
+- `doc/stream-server-code-review.md` 指出了 H.264 解析重复、service 回调类型不安全、全局 service 单例死代码、HTTP 路由巨函数，以及若干生命周期/配置问题。
 - stream server 运行在嵌入式 RV1106 目标板上，因此改动必须保守处理 shutdown 顺序、回调生命周期和运行期开销。
 
 ## 目标

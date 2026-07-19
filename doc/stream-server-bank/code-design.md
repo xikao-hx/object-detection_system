@@ -13,7 +13,7 @@
 - 结构：service 不再暴露全局单例 helper，不再使用 `void* user_data` 回调。
 - 结构：H.264 Annex-B 解析集中在 `common/h264_nal_parser.h`。
 - 结构：HTTP 路由注册与业务 handler 分离，API 响应保持兼容。
-- 验证：每步执行 `cmake --build stream-sever/build/Debug` 并记录结果。
+- 验证：每步执行 `cmake --build stream-server/build/Debug` 并记录结果。
 
 ## 现有代码观察
 - `StreamManager::Start()` 会启动 WebSocket 预览，但 `Stop()` 没有停止它。
@@ -25,17 +25,17 @@
 - `HttpApi::SetupRoutes()` 同时承担路由注册和业务逻辑，难以局部验证。
 
 ## 修改文件
-- `stream-sever/src/media_distribution/stream_manager.cpp`：补充 WebSocket 预览停止逻辑。
-- `stream-sever/src/media_producer/simple_ipc/mpi_config.h`：扩展 `venc_init()` 参数。
-- `stream-sever/src/media_producer/simple_ipc/simple_ipc_producer.cpp`：把 config 值传给 VENC 初始化。
-- `stream-sever/src/media_producer/media_manager.cpp`：移除 `const_cast`。
-- `stream-sever/src/media_distribution/*/*service*`：删除全局 service helper 和 `void*` 回调。
-- `stream-sever/src/main.cpp`：注册类型化 service 成员回调，调整 shutdown 清理顺序。
-- `stream-sever/src/common/h264_nal_parser.h`：新增共享 H.264 parser。
-- `stream-sever/src/media_distribution/file/file_saver.cpp`：复用 parser，并实现录制超时自动停止。
-- `stream-sever/src/media_distribution/wspreview/ws_preview.cpp`：复用 parser。
-- `stream-sever/src/media_distribution/webrtc/webrtc.cpp`：复用 parser。
-- `stream-sever/src/http.h` / `stream-sever/src/http.cpp`：拆分路由分组和 handler。
+- `stream-server/src/media_distribution/stream_manager.cpp`：补充 WebSocket 预览停止逻辑。
+- `stream-server/src/media_producer/simple_ipc/mpi_config.h`：扩展 `venc_init()` 参数。
+- `stream-server/src/media_producer/simple_ipc/simple_ipc_producer.cpp`：把 config 值传给 VENC 初始化。
+- `stream-server/src/media_producer/media_manager.cpp`：移除 `const_cast`。
+- `stream-server/src/media_distribution/*/*service*`：删除全局 service helper 和 `void*` 回调。
+- `stream-server/src/main.cpp`：注册类型化 service 成员回调，调整 shutdown 清理顺序。
+- `stream-server/src/common/h264_nal_parser.h`：新增共享 H.264 parser。
+- `stream-server/src/media_distribution/file/file_saver.cpp`：复用 parser，并实现录制超时自动停止。
+- `stream-server/src/media_distribution/wspreview/ws_preview.cpp`：复用 parser。
+- `stream-server/src/media_distribution/webrtc/webrtc.cpp`：复用 parser。
+- `stream-server/src/http.h` / `stream-server/src/http.cpp`：拆分路由分组和 handler。
 
 ## 禁止修改范围
 - 不改变 HTTP path、message 和 JSON 字段。
@@ -71,16 +71,16 @@
 
 ## 验证方式
 ```bash
-cmake --build stream-sever/build/Debug
+cmake --build stream-server/build/Debug
 ```
 
 ## 步骤结果
 - 已按设计实现。
 - 实际成功验证命令：
 ```bash
-cmake --build stream-sever/build/Debug
+cmake --build stream-server/build/Debug
 ```
-- `stream-sever/build` 不是已配置的 CMake 构建目录；`stream-sever/build/Debug` 包含 `CMakeCache.txt`。
+- `stream-server/build` 不是已配置的 CMake 构建目录；`stream-server/build/Debug` 包含 `CMakeCache.txt`。
 
 ## 后续步骤结果
 - Step 2：删除 service 全局单例死代码，保留 `StreamManager` 唯一所有权。
@@ -93,5 +93,5 @@ cmake --build stream-sever/build/Debug
 ## 最终验证方式
 ```bash
 git diff --check
-cmake --build stream-sever/build/Debug
+cmake --build stream-server/build/Debug
 ```

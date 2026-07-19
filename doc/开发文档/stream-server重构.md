@@ -1,7 +1,7 @@
 # Stream Server 代码 Review
 
 > 审查日期：2026-06-16
-> 目录：`stream-sever/src/`
+> 目录：`stream-server/src/`
 
 ---
 

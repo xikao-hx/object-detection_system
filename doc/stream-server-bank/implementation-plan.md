@@ -13,10 +13,10 @@
 - 移除 `MediaManager` const 加锁点里的 `const_cast`。
 
 ### 涉及文件
-- `stream-sever/src/media_distribution/stream_manager.cpp`
-- `stream-sever/src/media_producer/simple_ipc/mpi_config.h`
-- `stream-sever/src/media_producer/simple_ipc/simple_ipc_producer.cpp`
-- `stream-sever/src/media_producer/media_manager.cpp`
+- `stream-server/src/media_distribution/stream_manager.cpp`
+- `stream-server/src/media_producer/simple_ipc/mpi_config.h`
+- `stream-server/src/media_producer/simple_ipc/simple_ipc_producer.cpp`
+- `stream-server/src/media_producer/media_manager.cpp`
 - `memory-bank/*`
 
 ### 结构验收点
@@ -26,7 +26,7 @@
 
 ### 验证
 ```bash
-cmake --build stream-sever/build/Debug
+cmake --build stream-server/build/Debug
 ```
 
 ## Step 2：删除 service 全局单例死代码
@@ -37,7 +37,7 @@ cmake --build stream-sever/build/Debug
 
 ### 验证
 ```bash
-cmake --build stream-sever/build/Debug
+cmake --build stream-server/build/Debug
 ```
 
 ## Step 3：类型化 Stream Consumer 与运行时注册保护
@@ -49,7 +49,7 @@ cmake --build stream-sever/build/Debug
 
 ### 验证
 ```bash
-cmake --build stream-sever/build/Debug
+cmake --build stream-server/build/Debug
 ```
 
 ## Step 4：共享 H.264 NAL Parser
@@ -60,7 +60,7 @@ cmake --build stream-sever/build/Debug
 
 ### 验证
 ```bash
-cmake --build stream-sever/build/Debug
+cmake --build stream-server/build/Debug
 ```
 
 ## Step 5：录制时长自动停止
@@ -71,7 +71,7 @@ cmake --build stream-sever/build/Debug
 
 ### 验证
 ```bash
-cmake --build stream-sever/build/Debug
+cmake --build stream-server/build/Debug
 ```
 
 ## Step 6：拆分 HTTP 路由
@@ -82,7 +82,7 @@ cmake --build stream-sever/build/Debug
 
 ### 验证
 ```bash
-cmake --build stream-sever/build/Debug
+cmake --build stream-server/build/Debug
 ```
 
 ## Step 7：双目拼接流默认适配
@@ -94,11 +94,11 @@ cmake --build stream-sever/build/Debug
 - 扩展 HTTP 分辨率状态/切换值，保持原有 path、message 和 JSON 字段兼容。
 
 ### 涉及文件
-- `stream-sever/src/media_producer/simple_ipc/simple_ipc_config.h`
-- `stream-sever/src/media_producer/simple_ipc/simple_ipc_producer.h`
-- `stream-sever/src/media_producer/media_manager.h`
-- `stream-sever/src/main.cpp`
-- `stream-sever/src/http.cpp`
+- `stream-server/src/media_producer/simple_ipc/simple_ipc_config.h`
+- `stream-server/src/media_producer/simple_ipc/simple_ipc_producer.h`
+- `stream-server/src/media_producer/media_manager.h`
+- `stream-server/src/main.cpp`
+- `stream-server/src/http.cpp`
 - `memory-bank/*`
 
 ### 结构验收点
@@ -109,5 +109,5 @@ cmake --build stream-sever/build/Debug
 ### 验证
 ```bash
 git diff --check
-cmake --build stream-sever/build/Debug
+cmake --build stream-server/build/Debug
 ```
