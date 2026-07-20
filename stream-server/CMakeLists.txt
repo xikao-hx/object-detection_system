@@ -172,11 +172,11 @@ set_target_properties(aipc PROPERTIES
     INSTALL_RPATH "$ORIGIN/../lib"
     BUILD_WITH_INSTALL_RPATH OFF
 )
-install(TARGETS aipc uvc_capture_test uvc_vdec_probe
+install(TARGETS aipc
     RUNTIME DESTINATION ${AIPC_INSTALL_BIN_DIR}
 )
 
-# uvc_vdec_probe 使用仅由完整 Rockit 库导出的 VDEC API；板端基础镜像通常只预装精简版。
+# 正式 UVC 主通路按需加载仅由完整 Rockit 库导出的 VDEC API。
 install(FILES
     ${LUCKFOX_MPI_LIB_DIR}/librockit_full.so
     ${LUCKFOX_MPI_LIB_DIR}/librga.so

@@ -1,66 +1,58 @@
-# File 模块
+# File / MP4 录制模块
 
-`media_distribution/file` 负责把 Producer 输出的 H.264/H.265 编码流封装为 MP4 文件。当前文件模块只实现视频录制，不包含旧文档里提到的 `FileThread`、JPEG 拍照或 `rkvideo_register_stream_consumer` 接口。
+`media_distribution/file` 把 producer 输出的 H.264/H.265 编码数据封装为 MP4。它不重新编码视频，也不包含 JPEG 拍照功能。
 
-## 当前组件
+## 文件职责
 
-```text
-file/
-├── file_saver.h/cpp    # Mp4Recorder，使用 FFmpeg 写 MP4
-├── file_service.h/cpp  # FileService，提供录制控制和流消费者入口
-└── CMakeLists.txt
-```
+| 文件 | 职责 |
+| --- | --- |
+| [`file_service.h/.cpp`](./file_service.h) | `FileService`：录制控制门面、状态查询和 consumer 入口。 |
+| [`file_saver.h/.cpp`](./file_saver.h) | `Mp4Recorder`：FFmpeg muxer、SPS/PPS extradata、时间戳、限制和文件关闭。 |
 
 ## 数据流
 
 ```text
 EncodedStreamPtr
-      |
-      v
-FileService::OnEncodedStream
-      |
-      v
-Mp4Recorder::WriteFrame
-      |
-      v
-MP4 file
+  -> FileService::OnEncodedStream
+  -> if recording: Mp4Recorder::WriteFrame
+  -> parse SPS/PPS and write MP4 packets
+  -> close finalized MP4 file
 ```
 
-`FileService` 由 `StreamManager` 创建，作为 `MediaManager` 的 `Queued` 类型消费者注册。这样文件写入不会阻塞主 IO 线程或网络发送路径。
+`Mp4Recorder` 使用 mutex 串行保护 FFmpeg context、header 状态和文件关闭。只有处于 `kRecording` 时才写入 frame；达到时长或文件大小限制时必须关闭录制并记录原因。
 
-## 录制控制
+## 当前线程事实
 
-HTTP API：
+`main.cpp` 将 File consumer 注册为 `StreamConsumerType::Queued`，但当前 `EncodedStreamDispatcher` 尚未实现 per-consumer queue：`Queued` 与 `Direct` 一样在 VENC fetch thread 直接调用。`queue_size=10` 也尚未生效。
 
-- `GET /api/record/status`：查看录制状态、输出目录和统计信息。
-- `POST /api/record/start`：开始录制。
-- `POST /api/record/stop`：停止录制。
+`FileService::Start()` 当前只设置 `running_`，不会创建文件线程；`OnEncodedStream()` 直接调用 `Mp4Recorder::WriteFrame()`。因此旧文档中“独立文件线程、不阻塞取流”的描述不适用于当前实现。若要隔离磁盘 I/O，应先在 dispatcher 或 FileService 中设计有界队列、丢帧/背压和 shutdown drain，而不是只修改枚举值。
 
-C++ 入口：
+## 生命周期与控制
 
-```cpp
-FileServiceConfig config;
-config.mp4Config.outputDir = "/root/record";
-
-FileService service(config);
-service.Start();
-service.StartRecording();
-
-// Producer 输出帧时调用：
-service.OnEncodedStream(stream);
-
-service.StopRecording();
-service.Stop();
+```text
+construct FileService -> construct Mp4Recorder
+POST /api/record/start -> StartRecording -> create output context/file
+incoming H.264         -> WriteFrame
+POST /api/record/stop  -> StopRecording -> write trailer/close file
+StreamManager::Stop    -> ensure recording stopped
 ```
+
+HTTP 接口：
+
+- `GET /api/record/status`
+- `POST /api/record/start`
+- `POST /api/record/stop`
+
+默认输出目录由 `AIPC_RECORD_DIR` 指定，未设置时为 `/root/record`。
+
+## H.264 与 MP4
+
+输入是 Annex-B 编码数据。recorder 从流中提取 SPS/PPS 构造 codec extradata，写 header 后再写 packet。NAL 解析应复用 `common/h264_nal_parser.h`。输入的 `EncodedStreamPtr` 由调用方共享持有，recorder 不手动释放其中的 MB。
+
+## 配置和限制
+
+`Mp4RecordConfig` 包含输出目录、文件名前缀、宽高、fps、GOP、codec、最大时长和最大大小。宽高/fps 在创建 `StreamManager` 时确定；producer 运行期冷切换分辨率不会自动重建 recorder 配置。
 
 ## 构建依赖
 
-该模块从 `BUILDROOT_SYSROOT` 查找 FFmpeg 头文件和库：
-
-- `libavformat`
-- `libavcodec`
-- `libswresample`
-- `libavutil`
-- `libswscale`
-
-如果 sysroot 中缺少这些依赖，CMake 会在配置阶段直接失败。
+模块从 `BUILDROOT_SYSROOT` 检查并链接 FFmpeg `avformat`、`avcodec`、`avutil`、`swresample`、`swscale` 及其系统依赖。缺少头文件或库时 CMake 配置会明确失败。

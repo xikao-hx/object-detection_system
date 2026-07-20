@@ -61,28 +61,3 @@ target_link_libraries(uvc_h264_lib
 )
 
 target_compile_options(uvc_h264_lib PRIVATE -Wall -Wextra)
-
-add_executable(uvc_capture_test uvc_capture_test.cpp)
-target_link_libraries(uvc_capture_test PRIVATE uvc_lib)
-target_compile_options(uvc_capture_test PRIVATE -Wall -Wextra)
-set_target_properties(uvc_capture_test PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
-    BUILD_WITH_INSTALL_RPATH TRUE
-    INSTALL_RPATH "$ORIGIN/../lib"
-)
-
-add_executable(uvc_vdec_probe uvc_vdec_probe.cpp)
-target_link_directories(uvc_vdec_probe PRIVATE
-    ${LUCKFOX_MPI_LIB_DIR}
-    ${BUILDROOT_SYSROOT}/usr/lib
-)
-target_link_libraries(uvc_vdec_probe PRIVATE
-    uvc_lib
-    uvc_hardware_lib
-)
-target_compile_options(uvc_vdec_probe PRIVATE -Wall -Wextra)
-set_target_properties(uvc_vdec_probe PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
-    BUILD_WITH_INSTALL_RPATH TRUE
-    INSTALL_RPATH "$ORIGIN/../lib"
-)

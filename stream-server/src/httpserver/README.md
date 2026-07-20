@@ -1,117 +1,62 @@
-# HTTP Server 模块
+# HTTP Server 基础封装
 
-基于 [cpp-httplib](https://github.com/yhirose/cpp-httplib) 的 HTTP 服务器封装模块。
+`httpserver/` 是对 cpp-httplib 的薄封装，只提供 server 配置、路由注册、静态目录和生命周期。AIPC 的业务 endpoint 和 handler 位于上一级 [`http.cpp`](../http.cpp)。
 
-## 功能特性
+## 文件职责
 
-- 简单易用的 HTTP 服务器接口
-- 支持 GET/POST/PUT/DELETE 请求
-- 支持静态文件服务
-- 非阻塞启动（在独立线程中运行）
-- 线程安全
+| 文件 | 职责 |
+| --- | --- |
+| [`http_server.h`](./http_server.h) | `HttpServerConfig`、请求/响应类型别名、handler 类型和公开接口。 |
+| [`http_server.cpp`](./http_server.cpp) | cpp-httplib server 创建、线程池、路由转发、静态挂载和 server thread。 |
 
-## 使用方法
+## 调用关系
 
-### 基本使用
-
-```cpp
-#include "httpserver/http_server.h"
-
-// 创建服务器
-HttpServer server;
-
-// 配置
-HttpServerConfig config;
-config.host = "0.0.0.0";
-config.port = 8080;
-config.static_dir = "/app/www";  // 静态文件目录
-
-// 初始化
-server.Init(config);
-
-// 注册 API 路由
-server.Get("/api/status", [](const HttpRequest& req, HttpResponse& res) {
-    res.set_content("{\"status\": \"ok\"}", "application/json");
-});
-
-server.Post("/api/data", [](const HttpRequest& req, HttpResponse& res) {
-    // 处理 POST 请求
-    auto body = req.body;
-    res.set_content("{\"received\": true}", "application/json");
-});
-
-// 启动服务器（非阻塞）
-server.Start();
-
-// ... 其他业务逻辑 ...
-
-// 停止服务器
-server.Stop();
+```text
+main.cpp
+  -> HttpApi::Init
+     -> HttpServer::Init
+     -> HttpApi::SetupRoutes
+        -> HttpServer::{Get,Post,Put,Delete}
+  -> HttpApi::Start
+     -> HttpServer::Start (independent listen thread)
 ```
 
-### 静态文件服务
+`HttpServer` 不认识 `MediaManager`、`StreamManager`、producer 或任一 distribution service。业务 handler 通过 `HttpApi` 捕获 `this`，再访问对应 manager/service。
 
-```cpp
-// 方式1：在配置中指定
-HttpServerConfig config;
-config.static_dir = "/app/www";
-config.static_mount = "/";  // 挂载点
-server.Init(config);
+## 生命周期
 
-// 方式2：手动设置
-server.SetStaticFileDir("/static", "/app/static");
-```
+1. `Init(config)` 创建 httplib server，配置线程池和可选静态目录。
+2. 业务层注册所有路由。
+3. `Start()` 创建监听线程并立即返回。
+4. `Stop()` 调用 httplib stop 并 join server thread。
+5. 析构函数再次调用 `Stop()`，保证 RAII 清理。
 
-### 路由参数
+路由应在 `Start()` 前注册。不要在此模块加入具体 `/api/...` path 或媒体业务逻辑。
 
-```cpp
-// 支持路径参数（使用正则表达式）
-server.Get(R"(/api/user/(\d+))", [](const HttpRequest& req, HttpResponse& res) {
-    auto user_id = req.matches[1];
-    res.set_content("User ID: " + std::string(user_id), "text/plain");
-});
+## 配置
 
-// 查询参数
-server.Get("/api/search", [](const HttpRequest& req, HttpResponse& res) {
-    auto keyword = req.get_param_value("q");
-    res.set_content("Search: " + keyword, "text/plain");
-});
-```
+| 字段 | 默认值 | 含义 |
+| --- | --- | --- |
+| `host` | `0.0.0.0` | 监听地址。 |
+| `port` | `8080` | HTTP 端口。 |
+| `static_dir` | 空 | 静态文件目录；AIPC 传入安装目录旁的 `www`。 |
+| `static_mount` | `/` | 静态文件挂载点。 |
+| `thread_pool_size` | `4` | cpp-httplib task queue 的工作线程数。 |
 
-## API 参考
+## AIPC 业务路由分组
 
-### HttpServerConfig
+上层 `HttpApi` 当前注册以下路由族：
 
-| 字段 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| host | string | "0.0.0.0" | 监听地址 |
-| port | int | 8080 | 监听端口 |
-| static_dir | string | "" | 静态文件目录 |
-| static_mount | string | "/" | 静态文件挂载路径 |
-| thread_pool_size | int | 4 | 线程池大小 |
+- 系统：`GET /api/status`
+- RTSP：`GET /api/rtsp/status`、`POST /api/rtsp/start|stop`
+- WebRTC：status、start/stop、offer/answer、ICE 和 candidates
+- 录制：`GET /api/record/status`、`POST /api/record/start|stop`
+- Producer：status 和模式切换
+- Pipeline：status 和分辨率冷切换
+- AI/model：保留的兼容接口和模型文件管理
 
-### HttpServer 方法
+新增 API 时，在 `HttpApi` 对应的 `Register*Routes()` 中只绑定 method/path，业务逻辑放入命名 `Handle*` 方法；默认保持既有 status code、message 和 JSON 字段兼容。
 
-| 方法 | 说明 |
-|------|------|
-| Init(config) | 初始化服务器 |
-| Start() | 启动服务器（非阻塞） |
-| Stop() | 停止服务器 |
-| IsRunning() | 检查运行状态 |
-| Get(pattern, handler) | 注册 GET 路由 |
-| Post(pattern, handler) | 注册 POST 路由 |
-| Put(pattern, handler) | 注册 PUT 路由 |
-| Delete(pattern, handler) | 注册 DELETE 路由 |
-| SetStaticFileDir(mount, dir) | 设置静态文件目录 |
+## 并发注意事项
 
-## 依赖
-
-- cpp-httplib (3rdparty/cpp-httplib)
-- spdlog (日志)
-- pthread (线程)
-
-## 注意事项
-
-1. cpp-httplib 是 header-only 库，但需要链接 pthread
-2. 如果需要 HTTPS 支持，需要链接 OpenSSL
-3. 服务器在独立线程中运行，Start() 调用立即返回
+handler 运行在 httplib 线程池，不在全局 Asio `IoContext`。调用 manager 的切换或 service 启停时必须使用它们现有的同步/锁边界；不要从 handler 直接操作 producer 内部硬件对象。
